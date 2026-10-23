@@ -347,7 +347,7 @@ async function main() {
     );
     assert.equal(await db.journalEntry.count(), journalCountBefore + 1);
 
-    async function snapshot() {
+    async function snapshot(receivableId = invoice.id) {
       const [
         stored,
         storedCash,
@@ -359,7 +359,7 @@ async function main() {
         movements,
         entries,
       ] = await Promise.all([
-        db.receivable.findUnique({ where: { id: invoice.id } }),
+        db.receivable.findUnique({ where: { id: receivableId } }),
         db.cashAccount.findUnique({ where: { id: cash.id } }),
         db.cashDeskAccount.findUnique({ where: { id: desk.id } }),
         db.customer.findUnique({ where: { id: customer.id } }),
@@ -409,6 +409,125 @@ async function main() {
     );
     console.log(
       'PASS: TZS 251,000 receivable payment dated 2026-10-23, balanced journal, cash book and idempotent retry',
+    );
+
+    // A whole-shilling display must not turn an actual TZS 187.50 balance into
+    // a TZS 188 payment. Recreate the production amounts with real postings.
+    const fractionalInvoice = await receivables.create(
+      {
+        ...scope,
+        customerId: customer.id,
+        customerName: customer.name,
+        amount: 979687.5,
+        currency: 'TZS',
+        issueDate: '2026-10-22',
+        dueDate: '2026-11-21',
+      },
+      user,
+    );
+    await receivables.recordPayment(
+      fractionalInvoice.id,
+      { amount: 979500, cashAccountId: cash.id, paymentDate: '2026-10-22' },
+      user,
+    );
+    const fractionalBefore = await snapshot(fractionalInvoice.id);
+    assert.equal(fractionalBefore.paid, '979500.00');
+    assert.equal(fractionalBefore.outstanding, '187.50');
+    assert.equal(fractionalBefore.status, 'PARTIALLY_PAID');
+    assert.equal(fractionalBefore.customer, '187.50');
+    const fractionalDto = {
+      requestId: randomUUID(),
+      amount: 187.5,
+      cashAccountId: cash.id,
+      paymentDate: '2026-10-23',
+    };
+    await assert.rejects(
+      receivables.recordPayment(fractionalInvoice.id, { ...fractionalDto, amount: 188 }, user),
+      (error) => error.getStatus?.() === 400 && /exceeds outstanding amount/.test(error.message),
+      'TZS 188 must be rejected against an exact TZS 187.50 outstanding balance',
+    );
+    assert.deepEqual(
+      await snapshot(fractionalInvoice.id),
+      fractionalBefore,
+      'The rounded-up overpayment must not create financial records or change balances',
+    );
+    assert.equal(
+      await db.customerPayment.count({ where: { requestId: fractionalDto.requestId } }),
+      0,
+      'A rejected overpayment must not claim its payment request',
+    );
+
+    const fractionalSettled = await receivables.recordPayment(
+      fractionalInvoice.id,
+      fractionalDto,
+      user,
+    );
+    assert.equal(fractionalSettled.status, 'PAID');
+    assert.equal(fixed(fractionalSettled.amount), '979687.50');
+    assert.equal(fixed(fractionalSettled.paidAmount), '979687.50');
+    assert.equal(fixed(fractionalSettled.outstandingAmount), '0.00');
+    const fractionalPayment = await db.customerPayment.findFirstOrThrow({
+      where: { requestId: fractionalDto.requestId },
+      include: { allocations: true, journalEntry: { include: { lines: true } } },
+    });
+    assert.equal(fixed(fractionalPayment.amount), '187.50');
+    assert.equal(fixed(fractionalPayment.appliedAmount), '187.50');
+    assert.equal(fixed(fractionalPayment.unappliedAmount), '0.00');
+    assert.equal(fractionalPayment.currency, 'TZS');
+    assert.equal(fractionalPayment.allocations.length, 1);
+    assert.equal(fractionalPayment.allocations[0].receivableId, fractionalInvoice.id);
+    assert.equal(fixed(fractionalPayment.allocations[0].amount), '187.50');
+    assert.equal(fractionalPayment.journalEntry.status, 'POSTED');
+    assert.equal(fixed(fractionalPayment.journalEntry.totalDebit), '187.50');
+    assert.equal(fixed(fractionalPayment.journalEntry.totalCredit), '187.50');
+    assert.equal(fractionalPayment.journalEntry.lines.length, 2);
+    assert(
+      fractionalPayment.journalEntry.lines.some(
+        (line) => line.accountId === cashLedger.id && fixed(line.debit) === '187.50',
+      ),
+    );
+    assert(
+      fractionalPayment.journalEntry.lines.some(
+        (line) =>
+          line.accountId === arLedger.id &&
+          line.customerId === customer.id &&
+          fixed(line.credit) === '187.50',
+      ),
+    );
+    const fractionalMovement = await db.cashDeskMovement.findUniqueOrThrow({
+      where: { customerPaymentId: fractionalPayment.id },
+      include: { entries: true },
+    });
+    assert.equal(fixed(fractionalMovement.amount), '187.50');
+    assert.equal(fractionalMovement.receivableId, fractionalInvoice.id);
+    assert.equal(fractionalMovement.journalEntryId, fractionalPayment.journalEntryId);
+    assert.equal(fractionalMovement.entries.length, 1);
+    assert.equal(fractionalMovement.entries[0].accountId, desk.id);
+    assert.equal(fixed(fractionalMovement.entries[0].amount), '187.50');
+    const fractionalCommitted = await snapshot(fractionalInvoice.id);
+    assert.equal(fractionalCommitted.cash, '1259687.50');
+    assert.equal(fractionalCommitted.desk, '1259687.50');
+    assert.equal(fractionalCommitted.customer, '0.00');
+    for (const count of ['payments', 'allocations', 'journals', 'movements', 'entries']) {
+      assert.equal(
+        fractionalCommitted[count],
+        fractionalBefore[count] + 1,
+        `${count}: one exact settlement`,
+      );
+    }
+    const fractionalRetry = await receivables.recordPayment(
+      fractionalInvoice.id,
+      fractionalDto,
+      user,
+    );
+    assert.equal(fractionalRetry.id, fractionalInvoice.id);
+    assert.deepEqual(
+      await snapshot(fractionalInvoice.id),
+      fractionalCommitted,
+      'Retrying TZS 187.50 must not duplicate financial records or change exact balances',
+    );
+    console.log(
+      'PASS: TZS 188 overpayment rejected unchanged; exact TZS 187.50 settles with exact journal, allocation, cash book and idempotent retry',
     );
   } finally {
     if (db) await db.$disconnect();

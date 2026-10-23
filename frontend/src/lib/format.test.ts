@@ -3,6 +3,7 @@ import {
   formatDate,
   formatDateTime,
   formatMoney,
+  formatSettlementMoney,
   formatMoneyTotals,
   formatNumber,
   sumByCurrency,
@@ -42,6 +43,26 @@ describe('format', () => {
     it('falls back to TZS for an empty or missing currency code', () => {
       expect(formatMoney(500, '')).toBe('TZS 500');
       expect(formatMoney(500, '  tzs ')).toBe('TZS 500');
+    });
+  });
+
+  describe('formatSettlementMoney', () => {
+    it('preserves fractional TZS balances instead of rounding them to a payable whole shilling', () => {
+      expect(formatSettlementMoney(187.5)).toBe('TZS 187.50');
+      expect(formatSettlementMoney('187.99', 'TZS')).toBe('TZS 187.99');
+      expect(formatSettlementMoney('979687.50', 'TZS')).toBe('TZS 979,687.50');
+      expect(formatSettlementMoney('0.01', 'TZS')).toBe('TZS 0.01');
+      expect(formatSettlementMoney(188)).toBe('TZS 188');
+      expect(formatSettlementMoney('187.5', 'USD')).toBe('USD 187.50');
+    });
+
+    it('can preserve fractions in AR/AP page totals while other totals keep existing formatting', () => {
+      const totals = new Map([
+        ['TZS', 187.5],
+        ['USD', 25],
+      ]);
+      expect(formatMoneyTotals(totals, formatSettlementMoney)).toBe('TZS 187.50 + USD 25.00');
+      expect(formatMoneyTotals(totals)).toBe('TZS 188 + USD 25.00');
     });
   });
 
