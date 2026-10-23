@@ -32,7 +32,7 @@ import {
 } from '@/components/ui';
 import { useAuth } from '@/hooks/use-auth';
 import { usePartyCredit } from '@/hooks/use-party-credit';
-import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
+import { formatDate, formatSettlementMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
 import { localToday } from '@/features/invoice-desk/types';
 import {
   canDeleteFinancialDocument,
@@ -422,7 +422,9 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
             <DetailItem
               label="Credit Limit"
               value={
-                partyCredit ? formatMoney(partyCredit.creditLimit, partyCredit.baseCurrency) : '—'
+                partyCredit
+                  ? formatSettlementMoney(partyCredit.creditLimit, partyCredit.baseCurrency)
+                  : '—'
               }
             />
             <DetailItem
@@ -490,13 +492,13 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                         <InlineStatus status={order.paymentStatus} />
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.totalAmount, currency)}
+                        {formatSettlementMoney(order.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.paidAmount, currency)}
+                        {formatSettlementMoney(order.paidAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.outstandingAmount, currency)}
+                        {formatSettlementMoney(order.outstandingAmount, currency)}
                       </td>
                     </tr>
                   ))}
@@ -530,10 +532,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                         {fmtQty(delivery.acceptedLitres, 3)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(delivery.unitCost, currency)}
+                        {formatSettlementMoney(delivery.unitCost, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(delivery.totalCost, currency)}
+                        {formatSettlementMoney(delivery.totalCost, currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={delivery.status} />
@@ -579,16 +581,16 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                   <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
                   <td className="px-3 py-2">{unitLabel(line.unit)}</td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.unitCost, currency)}
+                    {formatSettlementMoney(line.unitCost, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.discountAmount, currency)}
+                    {formatSettlementMoney(line.discountAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.taxAmount, currency)}
+                    {formatSettlementMoney(line.taxAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.lineTotal, currency)}
+                    {formatSettlementMoney(line.lineTotal, currency)}
                   </td>
                   <td className="px-3 py-2">
                     <div>{line.batchNumber ?? '-'}</div>
@@ -619,11 +621,11 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                 />
                 <DetailItem
                   label="Total Debit"
-                  value={formatMoney(detail.journalEntry.totalDebit, currency)}
+                  value={formatSettlementMoney(detail.journalEntry.totalDebit, currency)}
                 />
                 <DetailItem
                   label="Total Credit"
-                  value={formatMoney(detail.journalEntry.totalCredit, currency)}
+                  value={formatSettlementMoney(detail.journalEntry.totalCredit, currency)}
                 />
                 <DetailItem label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
               </DetailGrid>
@@ -640,10 +642,10 @@ function PayableDetailModal({ payable, onClose }: { payable: Payable; onClose: (
                           </td>
                           <td className="px-3 py-2">{line.description ?? '-'}</td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {formatMoney(line.debit, currency)}
+                            {formatSettlementMoney(line.debit, currency)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {formatMoney(line.credit, currency)}
+                            {formatSettlementMoney(line.credit, currency)}
                           </td>
                         </tr>
                       ))
@@ -755,7 +757,7 @@ export function RecordPaymentModal({
     const outstanding = payableOutstandingAmount(payable);
     if (amt > outstanding) {
       setError(
-        `Amount cannot exceed outstanding balance ${formatMoney(outstanding, payable.currency)}`,
+        `Amount cannot exceed outstanding balance ${formatSettlementMoney(outstanding, payable.currency)}`,
       );
       return;
     }
@@ -823,7 +825,7 @@ export function RecordPaymentModal({
       open
       onClose={onClose}
       title={replacement ? 'Record Replacement Payment' : 'Record Payment'}
-      subtitle={`Outstanding: ${formatMoney(payableOutstandingAmount(payable), payable.currency)}`}
+      subtitle={`Outstanding: ${formatSettlementMoney(payableOutstandingAmount(payable), payable.currency)}`}
       size="md"
       footer={
         <>
@@ -1624,10 +1626,13 @@ export default function PayablesPage() {
           value={totalRecords}
         />
         <StatCard label="Open (page)" value={openRecords} />
-        <StatCard label="Outstanding (page)" value={formatMoneyTotals(outstandingTotals)} />
+        <StatCard
+          label="Outstanding (page)"
+          value={formatMoneyTotals(outstandingTotals, formatSettlementMoney)}
+        />
         <StatCard
           label="Overdue (page)"
-          value={formatMoneyTotals(overdueTotals)}
+          value={formatMoneyTotals(overdueTotals, formatSettlementMoney)}
           hint="Past due date"
         />
       </div>
@@ -1715,17 +1720,20 @@ export default function PayablesPage() {
           fields={[
             {
               label: 'Outstanding',
-              value: (p) => formatMoney(payableOutstandingAmount(p), p.currency),
+              value: (p) => formatSettlementMoney(payableOutstandingAmount(p), p.currency),
             },
             { label: 'Due', value: (p) => formatDate(p.dueDate) },
           ]}
           details={[
             { label: 'Issued', value: (p) => formatDate(p.issueDate) },
-            { label: 'Original amount', value: (p) => formatMoney(p.amount, p.currency) },
-            { label: 'Cash paid', value: (p) => formatMoney(payablePaidAmount(p), p.currency) },
+            { label: 'Original amount', value: (p) => formatSettlementMoney(p.amount, p.currency) },
+            {
+              label: 'Cash paid',
+              value: (p) => formatSettlementMoney(payablePaidAmount(p), p.currency),
+            },
             {
               label: 'Non-cash settlement',
-              value: (p) => formatMoney(p.settlementAdjustmentAmount ?? 0, p.currency),
+              value: (p) => formatSettlementMoney(p.settlementAdjustmentAmount ?? 0, p.currency),
             },
             { label: 'Company', value: (p) => p.company?.name || '—' },
           ]}
@@ -1810,10 +1818,10 @@ export default function PayablesPage() {
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {formatMoney(account.amount, account.currency)}
+                            {formatSettlementMoney(account.amount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
-                            {formatMoney(account.paidAmount, account.currency)}
+                            {formatSettlementMoney(account.paidAmount, account.currency)}
                             {account.documents.some(
                               (record) => Number(record.settlementAdjustmentAmount ?? 0) > 0,
                             ) && (
@@ -1829,10 +1837,10 @@ export default function PayablesPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
-                            {formatMoney(account.outstandingAmount, account.currency)}
+                            {formatSettlementMoney(account.outstandingAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {formatMoney(account.overdueAmount, account.currency)}
+                            {formatSettlementMoney(account.overdueAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3">{formatDate(account.nextDueDate)}</td>
                           <td className="px-4 py-3">
@@ -1890,14 +1898,14 @@ export default function PayablesPage() {
                                         <td className="px-3 py-2">{formatDate(p.issueDate)}</td>
                                         <td className="px-3 py-2">{formatDate(p.dueDate)}</td>
                                         <td className="px-3 py-2 text-right font-mono">
-                                          {formatMoney(p.amount, p.currency)}
+                                          {formatSettlementMoney(p.amount, p.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
-                                          {formatMoney(payablePaidAmount(p), p.currency)}
+                                          {formatSettlementMoney(payablePaidAmount(p), p.currency)}
                                           {Number(p.settlementAdjustmentAmount ?? 0) > 0 && (
                                             <div className="text-xs mt-1">
                                               Non-cash:{' '}
-                                              {formatMoney(
+                                              {formatSettlementMoney(
                                                 p.settlementAdjustmentAmount,
                                                 p.currency,
                                               )}
@@ -1905,7 +1913,10 @@ export default function PayablesPage() {
                                           )}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
-                                          {formatMoney(payableOutstandingAmount(p), p.currency)}
+                                          {formatSettlementMoney(
+                                            payableOutstandingAmount(p),
+                                            p.currency,
+                                          )}
                                         </td>
                                         <td className="px-3 py-2">
                                           <StatusBadge status={financialDocumentStatus(p)} />
@@ -1987,18 +1998,19 @@ export default function PayablesPage() {
                       </td>
                       <td className="px-4 py-3 font-medium">{payableSupplierName(p)}</td>
                       <td className="px-4 py-3 text-right font-mono">
-                        {formatMoney(p.amount, p.currency)}
+                        {formatSettlementMoney(p.amount, p.currency)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
-                        {formatMoney(payablePaidAmount(p), p.currency)}
+                        {formatSettlementMoney(payablePaidAmount(p), p.currency)}
                         {Number(p.settlementAdjustmentAmount ?? 0) > 0 && (
                           <div className="text-xs mt-1">
-                            Non-cash: {formatMoney(p.settlementAdjustmentAmount, p.currency)}
+                            Non-cash:{' '}
+                            {formatSettlementMoney(p.settlementAdjustmentAmount, p.currency)}
                           </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
-                        {formatMoney(payableOutstandingAmount(p), p.currency)}
+                        {formatSettlementMoney(payableOutstandingAmount(p), p.currency)}
                       </td>
                       <td className="px-4 py-3">{formatDate(p.issueDate)}</td>
                       <td className="px-4 py-3">{formatDate(p.dueDate)}</td>
