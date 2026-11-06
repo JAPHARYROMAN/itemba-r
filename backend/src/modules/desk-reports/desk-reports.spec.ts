@@ -137,20 +137,18 @@ describe('Reports accounting', () => {
         reversalOfId: kind === 'REVERSAL' ? 'reversed-expense' : null,
       },
     });
-    const r = cashReport(
-      [
-        entry('opening', '500', 'OPENING', '2026-08-01'),
-        entry('expense', '-20.10', 'EXPENSE', '2026-09-02'),
-        entry('reversed-expense', '-30', 'EXPENSE', '2026-09-03', true),
-        entry('transfer-out', '-50', 'TRANSFER', '2026-09-04'),
-        {
-          ...entry('transfer-in', '50', 'TRANSFER', '2026-09-04'),
-          account: { ...account, id: 'b', name: 'Cash' },
-        },
-        entry('reversal', '30', 'REVERSAL', '2026-09-20'),
-      ],
-      q,
-    );
+    const entries = [
+      entry('opening', '500', 'OPENING', '2026-08-01'),
+      entry('expense', '-20.10', 'EXPENSE', '2026-09-02'),
+      entry('reversed-expense', '-30', 'EXPENSE', '2026-09-03', true),
+      entry('transfer-out', '-50', 'TRANSFER', '2026-09-04'),
+      {
+        ...entry('transfer-in', '50', 'TRANSFER', '2026-09-04'),
+        account: { ...account, id: 'b', name: 'Cash' },
+      },
+      entry('reversal', '30', 'REVERSAL', '2026-09-20'),
+    ];
+    const r = cashReport(entries, q);
     expect(r.currencies[0]).toMatchObject({
       opening: '500.00',
       closing: '479.90',
@@ -160,6 +158,29 @@ describe('Reports accounting', () => {
     });
     expect(r.tables.find((t) => t.id === 'expenses')!.rows).toHaveLength(1);
     expect(r.tables.find((t) => t.id === 'statement')!.rows.at(-1)!.balance).toBe('479.90');
+
+    const statement = cashReport(
+      entries.filter((row) => row.account.id === account.id),
+      q,
+      account,
+    ).tables.find((t) => t.id === 'statement')!;
+    expect(statement.title).toBe('Cash account statement');
+    expect(statement.rows.map((row) => [row.id, row.balance])).toEqual([
+      ['opening-balance', '500.00'],
+      ['expense', '479.90'],
+      ['reversed-expense', '449.90'],
+      ['transfer-out', '399.90'],
+      ['reversal', '429.90'],
+      ['closing-balance', '429.90'],
+    ]);
+    expect(
+      cashReport([entries[0]], q, account)
+        .tables.find((t) => t.id === 'statement')!
+        .rows.map((row) => [row.id, row.balance]),
+    ).toEqual([
+      ['opening-balance', '500.00'],
+      ['closing-balance', '500.00'],
+    ]);
   });
 });
 describe('Reports read boundaries', () => {
@@ -195,6 +216,44 @@ describe('Reports read boundaries', () => {
       expect.any(Function),
       expect.objectContaining({ isolationLevel: 'RepeatableRead' }),
     );
+  });
+  it('checks account access before building a statement from that account’s entries', async () => {
+    const findFirst = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'account',
+        name: 'Bank',
+        companyId: 'allowed',
+        currency: 'TZS',
+        company: { name: 'Company' },
+        division: { name: 'Division' },
+        branch: { name: 'Branch' },
+      });
+    const findMany = jest.fn().mockResolvedValue([]);
+    const tx = {
+      cashDeskAccount: { findFirst },
+      cashDeskEntry: { count: jest.fn().mockResolvedValue(0), findMany },
+    };
+    const service = new DeskReportsService(
+      { $transaction: async (work: (tx: unknown) => unknown) => work(tx) } as never,
+      { companyWhereFor: async () => ({ companyId: 'allowed' }) } as never,
+      { recordWhereFor: async () => ({ branchId: { in: ['branch'] } }) } as never,
+    );
+    const query = { ...q, accountId: 'account' };
+    await expect(service.cash(user, query)).rejects.toThrow('Cash account not found');
+    expect(findMany).not.toHaveBeenCalled();
+    const result = await service.cash(user, query);
+    const accountScope = findFirst.mock.calls[1][0].where;
+    expect(accountScope.AND[0].AND).toEqual(
+      expect.arrayContaining([{ companyId: 'allowed' }, { branchId: { in: ['branch'] } }]),
+    );
+    expect(accountScope.AND[1]).toMatchObject({ id: 'account' });
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      account: accountScope,
+      businessDate: { lte: date(q.to) },
+    });
+    expect(result.currencies[0]).toMatchObject({ opening: '0.00', closing: '0.00' });
   });
   it.each([
     ['sales', 'salesDeskSale', 'salesDeskPayment', 'customerId'],

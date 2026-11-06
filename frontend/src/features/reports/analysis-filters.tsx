@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { useWorkspaceSearchParams as useSearchParams } from '@/components/workspace/workspace-navigation';
 import { useWorkspaceRouter as useGuardedRouter } from '@/components/workspace/workspace-navigation';
+import { useWorkspaceResource } from '@/hooks/use-workspace-resource';
+import type { Account } from '@/features/cash-desk/types';
 import { localToday, type Directory } from '@/features/invoice-desk/types';
 import type { AnalysisFilters } from './analysis-types';
 export function useAnalysisFilters(view: string) {
@@ -9,6 +11,7 @@ export function useAnalysisFilters(view: string) {
     router = useGuardedRouter(),
     today = localToday();
   const filters: AnalysisFilters = {
+    ...(view === 'cash' ? { accountId: params.get('accountId') || '' } : {}),
     companyId: params.get('companyId') || '',
     divisionId: params.get('divisionId') || '',
     branchId: params.get('branchId') || '',
@@ -42,15 +45,31 @@ export function AnalysisFilterForm({
   onApply,
   parties,
   partyLabel,
+  showCashAccounts = false,
 }: {
   value: AnalysisFilters;
   directory: Directory | null;
   onApply: (value: AnalysisFilters) => void;
   parties?: { id: string; name: string }[];
   partyLabel?: string;
+  showCashAccounts?: boolean;
 }) {
   const [draft, setDraft] = useState(value),
     [error, setError] = useState('');
+  const cashAccounts = useWorkspaceResource<Account[]>(
+    '/cash-desk/accounts',
+    Object.fromEntries(
+      Object.entries({
+        companyId: draft.companyId,
+        divisionId: draft.divisionId,
+        branchId: draft.branchId,
+      }).filter(([, id]) => id),
+    ),
+    showCashAccounts,
+  );
+  const accountOptions = cashAccounts.data?.filter(
+    (account) => !draft.currency || account.currency === draft.currency,
+  );
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const dates = [draft.from, draft.to];
@@ -109,6 +128,7 @@ export function AnalysisFilterForm({
                   setDraft((d) => ({
                     ...d,
                     [key]: e.target.value,
+                    ...(showCashAccounts ? { accountId: '' } : {}),
                     ...(i === 0
                       ? { divisionId: '', branchId: '', partyId: '' }
                       : i === 1
@@ -151,7 +171,13 @@ export function AnalysisFilterForm({
           Currency
           <select
             value={draft.currency}
-            onChange={(e) => setDraft((d) => ({ ...d, currency: e.target.value }))}
+            onChange={(e) =>
+              setDraft((d) => ({
+                ...d,
+                currency: e.target.value,
+                ...(showCashAccounts ? { accountId: '' } : {}),
+              }))
+            }
           >
             <option value="">All currencies, separately</option>
             {['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'].map((c) => (
@@ -159,6 +185,26 @@ export function AnalysisFilterForm({
             ))}
           </select>
         </label>
+        {showCashAccounts && (
+          <label>
+            Cash account
+            <select
+              value={draft.accountId || ''}
+              disabled={cashAccounts.loading}
+              onChange={(e) => setDraft((d) => ({ ...d, accountId: e.target.value }))}
+            >
+              <option value="">All accessible accounts</option>
+              {draft.accountId && !accountOptions?.some((a) => a.id === draft.accountId) && (
+                <option value={draft.accountId}>Selected account</option>
+              )}
+              {accountOptions?.map((account) => (
+                <option value={account.id} key={account.id}>
+                  {account.name} · {account.branch.name} · {account.currency}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {partyLabel && (
           <label>
             {partyLabel}
@@ -196,6 +242,14 @@ export function AnalysisFilterForm({
       {error && (
         <p className="reports-error" role="alert">
           {error}
+        </p>
+      )}
+      {showCashAccounts && cashAccounts.error && (
+        <p className="reports-error" role="alert">
+          Cash accounts unavailable.{' '}
+          <button type="button" onClick={cashAccounts.reload}>
+            Retry
+          </button>
         </p>
       )}
     </form>

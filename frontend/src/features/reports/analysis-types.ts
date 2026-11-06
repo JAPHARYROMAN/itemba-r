@@ -34,4 +34,5 @@ export type AnalysisFilters = {
   to: string;
   currency: string;
   partyId: string;
+  accountId?: string;
 };

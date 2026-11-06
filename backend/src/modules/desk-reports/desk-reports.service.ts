@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompanyScopeService } from '../../common/services/company-scope.service';
@@ -202,7 +202,16 @@ export class DeskReportsService {
       scope = await this.scope(user, q);
     return this.db.$transaction(
       async (tx) => {
-        const account = { AND: [scope, { currency: q.currency }] };
+        const account = {
+          AND: [
+            scope,
+            q.accountId ? { id: q.accountId, currency: q.currency } : { currency: q.currency },
+          ],
+        };
+        const selectedAccount = q.accountId
+          ? await tx.cashDeskAccount.findFirst({ where: account, include: names })
+          : undefined;
+        if (q.accountId && !selectedAccount) throw new NotFoundException('Cash account not found.');
         const where: Prisma.CashDeskEntryWhereInput = {
           account,
           businessDate: { lte: new Date(period.to) },
@@ -225,9 +234,11 @@ export class DeskReportsService {
               },
             },
           },
-          orderBy: [{ businessDate: 'asc' }, { id: 'asc' }],
+          orderBy: q.accountId
+            ? [{ businessDate: 'asc' }, { movement: { createdAt: 'asc' } }, { id: 'asc' }]
+            : [{ businessDate: 'asc' }, { id: 'asc' }],
         });
-        return cashReport(entries, q);
+        return cashReport(entries, q, selectedAccount ?? undefined);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30000 },
     );

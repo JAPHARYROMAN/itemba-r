@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   get: vi.fn(),
   push: vi.fn(),
   download: vi.fn(),
+  downloadDocument: vi.fn(),
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
@@ -29,6 +30,10 @@ vi.mock('@/lib/api-client', () => ({ backendGet: state.get }));
 vi.mock('@/lib/report-export', async (original) => ({
   ...(await original<typeof import('@/lib/report-export')>()),
   downloadTextFile: state.download,
+}));
+vi.mock('@/lib/export-download', async (original) => ({
+  ...(await original<typeof import('@/lib/export-download')>()),
+  downloadBinaryExport: state.downloadDocument,
 }));
 const analysis: Analysis = {
   source: 'Sales Desk',
@@ -168,6 +173,106 @@ beforeEach(() => {
   );
 });
 describe('Expanded reports', () => {
+  it('opens the selected cash account statement for the dates and exports its running balances', async () => {
+    const account = {
+      id: 'cash-account',
+      name: 'Office cash',
+      companyId: 'a',
+      currency: 'TZS',
+      company: 'Company A',
+      division: 'Division A',
+      branch: 'Branch A',
+    };
+    const read = state.get.getMockImplementation()!;
+    state.get.mockImplementation(async (path, options) => {
+      if (path === '/cash-desk/accounts') return [{ ...account, branch: { name: account.branch } }];
+      if (path !== '/desk-reports/cash') return read(path, options);
+      return {
+        ...analysis,
+        source: 'Cash Desk',
+        currencies: [{ currency: 'TZS', opening: '10.00', outflow: '12.00', closing: '-2.00' }],
+        tables: [
+          {
+            id: 'accounts',
+            title: 'Account balances',
+            columns: [{ key: 'name', label: 'Account' }],
+            rows: [account],
+          },
+          {
+            id: 'statement',
+            title: options.query.accountId ? 'Cash account statement' : 'Cash book',
+            columns: [
+              { key: 'description', label: 'Description' },
+              { key: 'balance', label: 'Running balance', money: true },
+            ],
+            rows: [
+              {
+                id: 'opening-balance',
+                description: 'Opening balance',
+                currency: 'TZS',
+                balance: '10.00',
+              },
+              { id: 'payment', description: 'Supplier payment', currency: 'TZS', balance: '-2.00' },
+              {
+                id: 'closing-balance',
+                description: 'Closing balance',
+                currency: 'TZS',
+                balance: '-2.00',
+              },
+            ],
+          },
+        ],
+      };
+    });
+    render(
+      <WorkspaceNavigationProvider
+        appId="reports"
+        initialHref="/reports?view=cash&companyId=a&from=2026-09-01&to=2026-09-30"
+        ownsPath={(path) => path === '/reports'}
+      >
+        <ReportsApp />
+      </WorkspaceNavigationProvider>,
+    );
+    await screen.findByRole('option', { name: 'Office cash · Branch A · TZS' });
+    fireEvent.change(screen.getByLabelText('Cash account'), { target: { value: account.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await screen.findByRole('heading', { name: 'Cash account statement' });
+    expect(state.get).toHaveBeenCalledWith(
+      '/desk-reports/cash',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          accountId: account.id,
+          companyId: 'a',
+          from: '2026-09-01',
+          to: '2026-09-30',
+        }),
+      }),
+    );
+    expect(
+      screen.getAllByRole('row').map((row) => row.querySelector('th, td')?.textContent),
+    ).toEqual(['Description', 'Opening balance', 'Supplier payment', 'Closing balance']);
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(state.download.mock.calls[0][0]).toBe('cash-account-statement.csv');
+    expect(state.download.mock.calls[0][2]).toContain('Supplier payment,-2.00');
+    fireEvent.change(screen.getByLabelText('Document export format'), { target: { value: 'pdf' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Export document' }));
+    await waitFor(() =>
+      expect(state.downloadDocument).toHaveBeenCalledWith(
+        '/generated-documents/table-export',
+        expect.objectContaining({
+          format: 'pdf',
+          companyId: 'a',
+          rows: [
+            ['Opening balance', '10.00'],
+            ['Supplier payment', '-2.00'],
+            ['Closing balance', '-2.00'],
+          ],
+          meta: expect.arrayContaining([{ label: 'Account', value: 'Office cash' }]),
+        }),
+        'document.pdf',
+      ),
+    );
+  });
   it('uses a companion report’s own hierarchy and drills without changing the main route', async () => {
     state.params = 'view=expenses&companyId=unrelated-main-company';
     render(
