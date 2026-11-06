@@ -249,14 +249,24 @@ export function ReportAnalysis({ report }: { report: ReportDefinition }) {
       : report.id === 'expenses'
         ? 'categories'
         : report.id === 'cash'
-          ? 'accounts'
+          ? filters.accountId
+            ? 'statement'
+            : 'accounts'
           : 'branches');
   const selected = tabs.find((t) => t.id === active) ?? tabs[0];
   const table: AnalysisTable | undefined = selected
     ? { ...selected, rows: selected.rows.filter((r) => !current || r.currency === current) }
     : undefined;
+  const cashAccount = filters.accountId
+    ? tabs.find((t) => t.id === 'accounts')?.rows.find((r) => r.id === filters.accountId)
+    : undefined;
+  const cashAccountStatement = !!cashAccount && table?.id === 'statement';
+  const currencyTotals = data.data?.currencies.find((c) => c.currency === current);
+  const periodCaption = `${current || 'All currencies'} · ${filters.from} to ${filters.to}`;
   const drill = (r: AnalysisRow) => {
-    if (table?.id === 'branches')
+    if (table?.id === 'accounts')
+      apply({ accountId: String(r.id), currency: String(r.currency) }, 'statement');
+    else if (table?.id === 'branches')
       apply(
         {
           companyId: String(r.companyId),
@@ -293,9 +303,10 @@ export function ReportAnalysis({ report }: { report: ReportDefinition }) {
         key={JSON.stringify(filters)}
         value={filters}
         directory={directory.data}
-        onApply={(next) => apply(next, active)}
+        onApply={(next) => apply(next, next.accountId ? 'statement' : active)}
         parties={parties.data ?? undefined}
         partyLabel={isCash ? undefined : source === 'sales' ? 'Customer' : 'Supplier'}
+        showCashAccounts={report.id === 'cash'}
       />
       <FilterCaption filters={filters} directory={directory.data} />
       {filters.partyId && (
@@ -365,19 +376,11 @@ export function ReportAnalysis({ report }: { report: ReportDefinition }) {
               </button>
             ))}
           </nav>
-          {table?.id === 'statement' && (
+          {table?.id === 'statement' && !cashAccountStatement && (
             <div className="analysis-statement-note">
               <strong>
-                Opening{' '}
-                {money(
-                  data.data.currencies.find((c) => c.currency === current)?.opening ?? '0',
-                  current,
-                )}{' '}
-                → Closing{' '}
-                {money(
-                  data.data.currencies.find((c) => c.currency === current)?.closing ?? '0',
-                  current,
-                )}
+                Opening {money(currencyTotals?.opening ?? '0', current)} → Closing{' '}
+                {money(currencyTotals?.closing ?? '0', current)}
               </strong>
               <p>
                 {isCash
@@ -390,25 +393,36 @@ export function ReportAnalysis({ report }: { report: ReportDefinition }) {
           )}
           {table && (
             <AnalysisGrid
-              companyId={filters.companyId || undefined}
+              companyId={
+                filters.companyId || (cashAccount ? String(cashAccount.companyId) : undefined)
+              }
               key={`${table.id}:${current}:${data.data.generatedAt}`}
               table={table}
-              caption={`${current || 'All currencies'} · ${filters.from} to ${filters.to}`}
+              chronological={cashAccountStatement}
+              caption={
+                cashAccountStatement
+                  ? `${periodCaption} · ${cashAccount.name} · ${cashAccount.branch}`
+                  : periodCaption
+              }
               metadata={{
                 Source: report.source,
                 Company:
+                  (cashAccount ? String(cashAccount.company) : '') ||
                   directory.data?.companies.find((c) => c.id === filters.companyId)?.name ||
                   filters.companyId ||
                   'All accessible companies',
                 Division:
+                  (cashAccount ? String(cashAccount.division) : '') ||
                   directory.data?.divisions.find((d) => d.id === filters.divisionId)?.name ||
                   filters.divisionId ||
                   'All accessible divisions',
                 Branch:
+                  (cashAccount ? String(cashAccount.branch) : '') ||
                   directory.data?.branches.find((b) => b.id === filters.branchId)?.name ||
                   filters.branchId ||
                   'All accessible branches',
                 Account:
+                  (cashAccount ? String(cashAccount.name) : '') ||
                   parties.data?.find((p) => p.id === filters.partyId)?.name ||
                   filters.partyId ||
                   'All accessible accounts',
@@ -416,14 +430,23 @@ export function ReportAnalysis({ report }: { report: ReportDefinition }) {
                 Basis: data.data.basis,
                 ...(table.id === 'statement'
                   ? {
-                      'Opening balance':
-                        data.data.currencies.find((c) => c.currency === current)?.opening ?? '0.00',
-                      'Closing balance':
-                        data.data.currencies.find((c) => c.currency === current)?.closing ?? '0.00',
+                      'Opening balance': currencyTotals?.opening ?? '0.00',
+                      ...(cashAccountStatement
+                        ? {
+                            'Money in': currencyTotals?.inflow ?? '0.00',
+                            'Money out': currencyTotals?.outflow ?? '0.00',
+                          }
+                        : {}),
+                      'Closing balance': currencyTotals?.closing ?? '0.00',
                     }
                   : {}),
               }}
-              onDrill={['parties', 'ageing', 'branches'].includes(table.id) ? drill : undefined}
+              onDrill={
+                ['parties', 'ageing', 'branches'].includes(table.id) ||
+                (report.id === 'cash' && table.id === 'accounts')
+                  ? drill
+                  : undefined
+              }
               onDocument={
                 !isCash && ['documents', 'overdue', 'payments', 'statement'].includes(table.id)
                   ? (id) => setDocument(id)

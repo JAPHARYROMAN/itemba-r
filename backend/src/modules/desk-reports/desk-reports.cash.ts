@@ -28,7 +28,11 @@ type Entry = {
     reversalOfId: string | null;
   };
 };
-export function cashReport(entries: Entry[], q: DeskReportQuery) {
+export function cashReport(
+  entries: Entry[],
+  q: DeskReportQuery,
+  selectedAccount?: Entry['account'],
+) {
   const period = reportPeriod(q),
     currencies = new Map<
       string,
@@ -49,6 +53,32 @@ export function cashReport(entries: Entry[], q: DeskReportQuery) {
     months = new Map<string, Row>();
   const ledger: Row[] = [],
     expenses: Row[] = [];
+  const emptyTotals = (currency: string) => ({
+    currency,
+    opening: D(),
+    inflow: D(),
+    outflow: D(),
+    closing: D(),
+    expenses: D(),
+    previous: D(),
+  });
+  const emptyAccount = (a: Entry['account']) => ({
+    id: a.id,
+    name: a.name,
+    companyId: a.companyId,
+    company: a.company.name,
+    division: a.division.name,
+    branch: a.branch.name,
+    currency: a.currency,
+    opening: '0.00',
+    inflow: '0.00',
+    outflow: '0.00',
+    closing: '0.00',
+  });
+  if (selectedAccount) {
+    currencies.set(selectedAccount.currency, emptyTotals(selectedAccount.currency));
+    accounts.set(selectedAccount.id, emptyAccount(selectedAccount));
+  }
   const add = (row: Row, key: string, value: Prisma.Decimal) => {
     row[key] = D(row[key] ?? 0)
       .plus(value)
@@ -60,28 +90,9 @@ export function cashReport(entries: Entry[], q: DeskReportQuery) {
       date = entry.businessDate.toISOString().slice(0, 10),
       amount = D(entry.amount);
     if (date > period.to) continue;
-    const c = currencies.get(a.currency) ?? {
-      currency: a.currency,
-      opening: D(),
-      inflow: D(),
-      outflow: D(),
-      closing: D(),
-      expenses: D(),
-      previous: D(),
-    };
+    const c = currencies.get(a.currency) ?? emptyTotals(a.currency);
     currencies.set(a.currency, c);
-    const account = accounts.get(a.id) ?? {
-      id: a.id,
-      name: a.name,
-      company: a.company.name,
-      division: a.division.name,
-      branch: a.branch.name,
-      currency: a.currency,
-      opening: '0.00',
-      inflow: '0.00',
-      outflow: '0.00',
-      closing: '0.00',
-    };
+    const account = accounts.get(a.id) ?? emptyAccount(a);
     accounts.set(a.id, account);
     c.closing = c.closing.plus(amount);
     add(account, 'closing', amount);
@@ -202,6 +213,24 @@ export function cashReport(entries: Entry[], q: DeskReportQuery) {
     running.set(String(row.currency), value);
     row.balance = value.toFixed(2);
   }
+  if (selectedAccount) {
+    const { currency } = selectedAccount;
+    const totals = currencies.get(currency)!;
+    ledger.unshift({
+      id: 'opening-balance',
+      date: period.from,
+      description: 'Opening balance',
+      currency,
+      balance: totals.opening.toFixed(2),
+    });
+    ledger.push({
+      id: 'closing-balance',
+      date: period.to,
+      description: 'Closing balance',
+      currency,
+      balance: totals.closing.toFixed(2),
+    });
+  }
   const tables: Table[] = [
     {
       id: 'categories',
@@ -253,19 +282,19 @@ export function cashReport(entries: Entry[], q: DeskReportQuery) {
     },
     {
       id: 'statement',
-      title: 'Cash book',
+      title: selectedAccount ? 'Cash account statement' : 'Cash book',
       columns: [
         col('date', 'Date'),
-        col('account', 'Account'),
-        col('company', 'Company'),
-        col('branch', 'Branch'),
+        ...(selectedAccount
+          ? []
+          : [col('account', 'Account'), col('company', 'Company'), col('branch', 'Branch')]),
         col('kind', 'Movement'),
         col('description', 'Description'),
         col('reference', 'Reference'),
         col('status', 'Status'),
-        col('currency', 'Currency'),
-        col('inflow', 'In', true),
-        col('outflow', 'Out', true),
+        ...(selectedAccount ? [] : [col('currency', 'Currency')]),
+        col('inflow', selectedAccount ? 'Money in' : 'In', true),
+        col('outflow', selectedAccount ? 'Money out' : 'Out', true),
         col('balance', 'Running balance', true),
       ],
       rows: ledger,

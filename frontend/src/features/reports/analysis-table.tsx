@@ -7,8 +7,6 @@ import { downloadTextFile, toCsv } from '@/lib/report-export';
 import { money } from '@/features/invoice-desk/types';
 import { expenseCategories, movementLabels } from '@/features/cash-desk/types';
 import type { AnalysisRow, AnalysisTable } from './analysis-types';
-export const csvSafe = (value: string) =>
-  /^[\s]*[=+\-@]/.test(value) || /^[\t\r\n]/.test(value) ? `'${value}` : value;
 export function analysisCsv(
   table: AnalysisTable,
   rows = table.rows,
@@ -16,14 +14,11 @@ export function analysisCsv(
 ) {
   return (
     '\uFEFF' +
-    toCsv(
-      ['Report', csvSafe(table.title)],
-      Object.entries(metadata).map(([key, value]) => [key, csvSafe(value)]),
-    ) +
+    toCsv(['Report', table.title], Object.entries(metadata)) +
     '\r\n\r\n' +
     toCsv(
       table.columns.map((c) => c.label),
-      rows.map((row) => table.columns.map((c) => csvSafe(String(row[c.key] ?? '')))),
+      rows.map((row) => table.columns.map((c) => String(row[c.key] ?? ''))),
     )
   );
 }
@@ -43,9 +38,11 @@ export function AnalysisGrid({
   metadata = {},
   rowLink,
   companyId,
+  chronological = false,
 }: {
   table: AnalysisTable;
   companyId?: string;
+  chronological?: boolean;
   onDrill?: (row: AnalysisRow) => void;
   onDocument?: (id: string) => void;
   caption: string;
@@ -57,11 +54,13 @@ export function AnalysisGrid({
     [search, setSearch] = useState(''),
     [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null),
     [printing, setPrinting] = useState(false);
-  const filtered = table.rows.filter((r) =>
-    table.columns.some((c) =>
-      readableCell(c.key, r[c.key]).toLowerCase().includes(search.toLowerCase()),
-    ),
-  );
+  const filtered = search
+    ? table.rows.filter((r) =>
+        table.columns.some((c) =>
+          readableCell(c.key, r[c.key]).toLowerCase().includes(search.toLowerCase()),
+        ),
+      )
+    : table.rows;
   const sorted = sort
     ? [...filtered].sort((a, b) => {
         const c = table.columns.find((c) => c.key === sort.key)!;
@@ -104,26 +103,30 @@ export function AnalysisGrid({
         <div>
           <h2>{table.title}</h2>
           <p>
-            {sorted.length.toLocaleString()} of {table.rows.length.toLocaleString()} rows ·{' '}
+            {!chronological &&
+              `${sorted.length.toLocaleString()} of ${table.rows.length.toLocaleString()} rows · `}
             {caption}
           </p>
         </div>
         <div className="reports-actions">
-          <input
-            type="search"
-            aria-label="Search report results"
-            value={search}
-            placeholder="Search results…"
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
+          {!chronological && (
+            <input
+              type="search"
+              aria-label="Search report results"
+              value={search}
+              placeholder="Search results…"
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+          )}
           <DocumentExportButton
             table={{
               title: table.title,
               companyId,
-              subtitle: caption,
+              subtitle: caption.slice(0, 160),
+              baseName: chronological ? 'cash-account-statement' : undefined,
               orientation: table.columns.length > 5 ? 'landscape' : 'portrait',
               numericColumns: table.columns.flatMap((column, index) =>
                 column.money ? [index] : [],
@@ -148,7 +151,7 @@ export function AnalysisGrid({
             disabled={!sorted.length}
             onClick={() =>
               downloadTextFile(
-                `${table.id}.csv`,
+                chronological ? 'cash-account-statement.csv' : `${table.id}.csv`,
                 'text/csv;charset=utf-8',
                 analysisCsv(table, sorted, {
                   Scope: caption,
@@ -187,15 +190,19 @@ export function AnalysisGrid({
                       sort?.key === c.key ? (sort.desc ? 'descending' : 'ascending') : 'none'
                     }
                   >
-                    <button
-                      className="analysis-sort"
-                      onClick={() =>
-                        setSort((s) => ({ key: c.key, desc: s?.key === c.key ? !s.desc : false }))
-                      }
-                    >
-                      {c.label}
-                      {sort?.key === c.key ? (sort.desc ? ' ↓' : ' ↑') : ''}
-                    </button>
+                    {chronological ? (
+                      c.label
+                    ) : (
+                      <button
+                        className="analysis-sort"
+                        onClick={() =>
+                          setSort((s) => ({ key: c.key, desc: s?.key === c.key ? !s.desc : false }))
+                        }
+                      >
+                        {c.label}
+                        {sort?.key === c.key ? (sort.desc ? ' ↓' : ' ↑') : ''}
+                      </button>
+                    )}
                   </th>
                 ))}
                 {(onDrill || onDocument || rowLink) && (
@@ -210,11 +217,13 @@ export function AnalysisGrid({
                 <tr key={`${r.id ?? r.month}-${r.currency}-${i}`}>
                   {table.columns.map((c) => (
                     <td key={c.key} className={c.money ? 'reports-number' : ''}>
-                      {c.money
-                        ? r[c.key] === ''
-                          ? 'Unavailable'
-                          : money(String(r[c.key] ?? '0'))
-                        : readableCell(c.key, r[c.key]) || '—'}
+                      {chronological && r[c.key] === undefined
+                        ? '—'
+                        : c.money
+                          ? r[c.key] === ''
+                            ? 'Unavailable'
+                            : money(String(r[c.key] ?? '0'))
+                          : readableCell(c.key, r[c.key]) || '—'}
                     </td>
                   ))}
                   {(onDrill || onDocument || rowLink) && (
@@ -252,8 +261,9 @@ export function AnalysisGrid({
         </nav>
       )}
       <p className="reports-footnote">
-        Export and Print / PDF include all {sorted.length.toLocaleString()} matching rows in this
-        table, in the selected sort order.
+        {chronological
+          ? 'Exports include the opening balance, all transactions in date order, and the closing balance.'
+          : `Export and Print / PDF include all ${sorted.length.toLocaleString()} matching rows in this table, in the selected sort order.`}
       </p>
     </section>
   );
