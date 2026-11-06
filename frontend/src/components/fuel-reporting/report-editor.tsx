@@ -1,6 +1,6 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { backendGet, backendPost, backendUpload } from '@/lib/api-client';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ApiError, backendGet, backendPost, backendUpload } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import {
   Collections,
@@ -12,6 +12,7 @@ import {
   TankDips,
 } from './report-fields';
 import { Discrepancies, SummaryCards, downloadCsv } from './report-summary';
+import { recoverDraft } from './report-recovery';
 import {
   editablePayload,
   newPayload,
@@ -21,6 +22,8 @@ import {
   type Revision,
   type Workspace,
 } from './types';
+
+type Operation = 'draft' | 'close' | 'upload' | 'reopen' | 'recover';
 
 export function ReportEditor({
   branch,
@@ -51,38 +54,58 @@ export function ReportEditor({
       ? editablePayload(workspace.report.payload)
       : newPayload(workspace.catalog, workspace.previous),
   );
-  const [saved, setSaved] = useState(() => JSON.stringify(payload));
-  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(payload);
+  const [operation, setOperation] = useState<Operation | null>(null);
   const [error, setError] = useState('');
+  const [conflict, setConflict] = useState<{ latest: Report | null } | null>(null);
+  const [reviewRecovered, setReviewRecovered] = useState(false);
   const [notice, setNotice] = useState('');
   const [correction, setCorrection] = useState('');
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [revision, setRevision] = useState<Revision | null>(null);
   const [closing, setClosing] = useState(false);
-  const savingRef = useRef(false);
+  const closeHeadingId = useId();
+  const closeHeading = useRef<HTMLHeadingElement>(null);
+  const closeConfirmation = useRef<HTMLDivElement>(null);
+  const closeTrigger = useRef<HTMLButtonElement>(null);
+  const requestInFlight = useRef(false);
+  const feedback = useRef<HTMLDivElement>(null);
+  const busy = operation !== null;
   const closed = report?.status === 'CLOSED';
-  const dirty = JSON.stringify(payload) !== saved;
+  const dirty = payload !== saved && JSON.stringify(payload) !== JSON.stringify(saved);
+  const locked = busy || dirty;
   const readOnly = !canManage || closed || !!revision;
   const catalog = revision?.payload.catalog ?? report?.payload.catalog ?? workspace.catalog;
   const displayed = revision?.payload ?? payload;
   const summary = revision?.summary ?? report?.summary;
+  const latest = conflict?.latest;
+  const recovery = latest?.status === 'DRAFT' ? recoverDraft(saved, payload, latest.payload) : null;
+  const draftStatus = reviewRecovered ? 'Review and save' : 'Unsaved changes';
   const status = busy
-    ? 'Saving…'
-    : error && dirty
+    ? operation === 'recover'
+      ? 'Loading revision…'
+      : 'Saving…'
+    : conflict || (error && dirty)
       ? 'Not saved'
       : dirty
-        ? 'Unsaved changes'
+        ? draftStatus
         : report
           ? `Saved · revision ${report.version}`
           : 'New shift report';
 
   useEffect(() => {
-    onLock(busy || dirty);
-    return () => onLock(false);
-  }, [busy, dirty, onLock]);
+    onLock(locked);
+  }, [locked, onLock]);
+  useEffect(() => () => onLock(false), [onLock]);
+  useEffect(() => {
+    if (closing && !readOnly) {
+      closeHeading.current?.focus({ preventScroll: true });
+      closeConfirmation.current?.scrollIntoView?.({ block: 'center' });
+    }
+  }, [closing, readOnly]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      if (dirty || savingRef.current) {
+      if (dirty || requestInFlight.current) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -93,12 +116,11 @@ export function ReportEditor({
 
   const save = useCallback(
     async (close = false) => {
-      if (savingRef.current || readOnly) return;
-      savingRef.current = true;
-      setBusy(true);
+      if (requestInFlight.current || readOnly || conflict) return;
+      requestInFlight.current = true;
+      setOperation(close ? 'close' : 'draft');
       setError('');
       setNotice('');
-      const sent = JSON.stringify(payload);
       try {
         const result = await backendPost<Report>(`${apiBase}/reports`, {
           branchId: branch.id,
@@ -109,45 +131,98 @@ export function ReportEditor({
           close,
         });
         setReport(result);
-        setSaved(sent);
+        setSaved(payload);
+        setReviewRecovered(false);
         onSaved(result);
         if (close) {
           setClosing(false);
           setNotice('Shift closed. Its figures are now included in the daily summary.');
         }
       } catch (e) {
+        if (
+          e instanceof ApiError &&
+          e.status === 409 &&
+          e.message.startsWith('This report changed in another window.')
+        ) {
+          setConflict({ latest: null });
+          setClosing(false);
+          return;
+        }
         setError(
           e instanceof Error ? e.message : 'Could not save. Your entries are still on this screen.',
         );
       } finally {
-        savingRef.current = false;
-        setBusy(false);
+        requestInFlight.current = false;
+        setOperation(null);
       }
     },
-    [readOnly, payload, branch.id, date, shift, report, onSaved, apiBase],
+    [readOnly, conflict, payload, branch.id, date, shift, report, onSaved, apiBase],
   );
 
   useEffect(() => {
-    if (!dirty || busy || readOnly || error) return;
+    if (!dirty || busy || readOnly || error || conflict || reviewRecovered) return;
     const timer = window.setTimeout(() => {
       void save();
     }, 1600);
     return () => window.clearTimeout(timer);
-  }, [dirty, busy, readOnly, error, save]);
+  }, [dirty, busy, readOnly, error, conflict, reviewRecovered, save]);
+
+  async function loadLatest() {
+    if (requestInFlight.current || !conflict) return;
+    requestInFlight.current = true;
+    setOperation('recover');
+    setError('');
+    try {
+      const current = await backendGet<Workspace>(`${apiBase}/workspace`, {
+        query: { branchId: branch.id, businessDate: date, shift },
+      });
+      if (!current.report) throw new Error('The latest saved shift could not be found.');
+      setConflict({ latest: current.report });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load the latest revision.');
+    } finally {
+      requestInFlight.current = false;
+      setOperation(null);
+    }
+  }
+
+  function applyRecovery() {
+    if (!latest || !recovery || requestInFlight.current) return;
+    setPayload(recovery.payload);
+    setSaved(recovery.base);
+    setReport(latest);
+    setConflict(null);
+    setError('');
+    setRevisions([]);
+    setReviewRecovered(recovery.changed);
+    setNotice(
+      recovery.changed
+        ? 'Your entries are ready to review. Select Save draft to save them.'
+        : 'The latest revision already contains your entries.',
+    );
+    onSaved(latest);
+  }
+
+  function cancelClose() {
+    if (requestInFlight.current) return;
+    setClosing(false);
+    closeTrigger.current?.focus();
+  }
 
   const change = (value: Payload) => {
     setPayload(value);
     setError('');
-    setNotice('');
+    if (!reviewRecovered) setNotice('');
     setClosing(false);
   };
   async function upload(file: File) {
+    if (requestInFlight.current) return;
     if (file.size > 10 * 1024 * 1024) {
       setError('Choose an image or PDF smaller than 10 MB.');
       return;
     }
-    setBusy(true);
-    savingRef.current = true;
+    setOperation('upload');
+    requestInFlight.current = true;
     setError('');
     try {
       const data = new FormData();
@@ -163,13 +238,14 @@ export function ReportEditor({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not upload the document.');
     } finally {
-      savingRef.current = false;
-      setBusy(false);
+      requestInFlight.current = false;
+      setOperation(null);
     }
   }
   async function reopen() {
-    if (!report || !correction.trim()) return;
-    setBusy(true);
+    if (requestInFlight.current || !report || !correction.trim()) return;
+    requestInFlight.current = true;
+    setOperation('reopen');
     setError('');
     try {
       const result = await backendPost<Report>(`${apiBase}/reports/${report.id}/reopen`, {
@@ -183,7 +259,8 @@ export function ReportEditor({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not reopen.');
     } finally {
-      setBusy(false);
+      requestInFlight.current = false;
+      setOperation(null);
     }
   }
   async function loadRevisions() {
@@ -210,57 +287,58 @@ export function ReportEditor({
               : 'First report: enter opening meter and tank dip volumes as the starting baseline.'}
           </p>
         </div>
-        <span className="fr-save-state" role="status">
-          {status}
-        </span>
-      </div>
-      {error ? (
-        <div className="fr-error" role="alert">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="fr-success" role="status">
-          {notice}
-        </div>
-      ) : null}
-      {summary && !dirty ? <SummaryCards summary={summary} /> : null}
-      {report ? (
-        <div className="fr-revisions">
-          <button
-            type="button"
-            className="fr-text-button"
-            disabled={dirty || busy}
-            onClick={() => void loadRevisions()}
-          >
-            View revision history
-          </button>
-          {revisions.length ? (
-            <select
-              aria-label="Report revision"
-              value={revision?.id ?? ''}
-              onChange={(e) => setRevision(revisions.find((r) => r.id === e.target.value) ?? null)}
+        <div className="fr-save-state">
+          <span role="status">{status}</span>
+          {conflict || error ? (
+            <button
+              type="button"
+              className="fr-text-button"
+              onClick={() => feedback.current?.focus()}
             >
-              <option value="">Current report</option>
-              {revisions.map((r) => (
-                <option key={r.id} value={r.id}>
-                  Revision {r.version} · {r.action.toLowerCase()} · {r.authorName} ·{' '}
-                  {new Date(r.createdAt).toLocaleString('en-TZ', {
-                    timeZone: 'Africa/Dar_es_Salaam',
-                  })}
-                </option>
-              ))}
-            </select>
+              Details
+            </button>
           ) : null}
         </div>
-      ) : null}
+      </div>
+      {!canManage && (
+        <p className="fr-notice">You have read-only access to shift reports at this station.</p>
+      )}
+      <SummaryCards summary={summary} />
+      <div className="fr-revisions">
+        <button
+          type="button"
+          className="fr-text-button"
+          disabled={!report || dirty || busy || !!conflict}
+          onClick={() => void loadRevisions()}
+        >
+          View revision history
+        </button>
+        {revisions.length ? (
+          <select
+            aria-label="Report revision"
+            disabled={dirty || busy || !!conflict}
+            value={revision?.id ?? ''}
+            onChange={(e) => setRevision(revisions.find((r) => r.id === e.target.value) ?? null)}
+          >
+            <option value="">Current report</option>
+            {revisions.map((r) => (
+              <option key={r.id} value={r.id}>
+                Revision {r.version} · {r.action.toLowerCase()} · {r.authorName} ·{' '}
+                {new Date(r.createdAt).toLocaleString('en-TZ', {
+                  timeZone: 'Africa/Dar_es_Salaam',
+                })}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
       {revision ? (
         <p className="fr-notice">
           Viewing a preserved revision by {revision.authorName}.
           {revision.reason ? ` Correction reason: ${revision.reason}` : ''}
         </p>
       ) : null}
-      <fieldset disabled={readOnly || busy} className="fr-report-fields">
+      <fieldset disabled={readOnly || (busy && operation !== 'draft')} className="fr-report-fields">
         {mode === 'report' ? (
           <>
             <PumpReadings payload={displayed} catalog={catalog} change={change} />
@@ -313,6 +391,7 @@ export function ReportEditor({
               <input
                 type="file"
                 accept="image/jpeg,image/png,application/pdf"
+                disabled={busy}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = '';
@@ -332,7 +411,55 @@ export function ReportEditor({
           </Field>
         </Section>
       </fieldset>
-      {summary && !dirty ? (
+      {conflict || error ? (
+        <div className="fr-error" ref={feedback} tabIndex={-1}>
+          {conflict ? (
+            <>
+              <p role="alert">This shift changed in another window. Your entries are still here.</p>
+              {latest?.status === 'CLOSED' ? (
+                <p>
+                  Revision {latest.version} is closed. Reopen the shift in another window, then load
+                  the latest revision again here.
+                </p>
+              ) : null}
+              {recovery ? (
+                <>
+                  {recovery.overlaps.length ? (
+                    <p>
+                      Both drafts changed {recovery.overlaps.join(', ')}. Applying your entries
+                      keeps your version of these sections. The other version remains in revision
+                      history.
+                    </p>
+                  ) : (
+                    <p>
+                      Your entries can be combined with the changes in revision {latest?.version}.
+                    </p>
+                  )}
+                  <button type="button" className="fr-secondary" onClick={applyRecovery}>
+                    Apply my entries to revision {latest?.version}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="fr-secondary"
+                  disabled={busy}
+                  onClick={() => void loadLatest()}
+                >
+                  Load latest revision
+                </button>
+              )}
+            </>
+          ) : null}
+          {error ? <p role="alert">{error}</p> : null}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="fr-success" role="status">
+          {notice}
+        </div>
+      ) : null}
+      {summary ? (
         <>
           <Discrepancies summary={summary} />
           {!closed && summary.issues.length && !revision ? (
@@ -357,15 +484,17 @@ export function ReportEditor({
             <button
               type="button"
               className="fr-secondary"
-              disabled={busy}
+              disabled={busy || !!conflict}
               onClick={() => void save()}
             >
               Save draft
             </button>
             <button
+              ref={closeTrigger}
               type="button"
               className="fr-primary"
-              disabled={busy || dirty || !report || !!summary?.issues.length}
+              disabled={busy || dirty || !!conflict || !report || !!summary?.issues.length}
+              aria-expanded={closing}
               onClick={() => setClosing(true)}
             >
               Review & close shift
@@ -374,14 +503,26 @@ export function ReportEditor({
         </div>
       ) : null}
       {closing && !readOnly ? (
-        <div className="fr-close-confirm" role="region" aria-label="Confirm shift closure">
-          <h3>Close the {shift.toLowerCase()} shift?</h3>
+        <div
+          ref={closeConfirmation}
+          className="fr-close-confirm"
+          role="region"
+          aria-labelledby={closeHeadingId}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.stopPropagation();
+            cancelClose();
+          }}
+        >
+          <h3 ref={closeHeading} id={closeHeadingId} tabIndex={-1}>
+            Close the {shift.toLowerCase()} shift?
+          </h3>
           <p>
             The submitted readings, attendant names and {summary?.flagged ?? 0} discrepancies will
             be preserved. This shift will count toward the daily report.
           </p>
           <div className="fr-actions">
-            <button type="button" className="fr-secondary" onClick={() => setClosing(false)}>
+            <button type="button" className="fr-secondary" disabled={busy} onClick={cancelClose}>
               Keep editing
             </button>
             <button

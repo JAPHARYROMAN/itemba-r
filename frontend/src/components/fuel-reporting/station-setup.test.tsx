@@ -22,6 +22,7 @@ const tank = {
   updatedAt: timestamp,
 };
 const workspace: Workspace = {
+  canManageReports: true,
   catalog: { tanks: [tank], nozzles: [] },
   report: null,
   previous: null,

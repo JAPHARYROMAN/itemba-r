@@ -5,6 +5,8 @@ import { CompanyScopeService } from '../../common/services';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CreateReportingPumpDto } from './fuel-reporting.dto';
 import { ALL_PERMISSIONS, ROLES } from '../../../../database/seeds/permission-matrix';
+import { ForbiddenException } from '@nestjs/common';
+import { AccessLevel } from '@prisma/client';
 
 const branchId = 'a0663e36-0c71-4a29-bdb6-889c4e000001';
 const manager: AuthUser = {
@@ -16,7 +18,17 @@ const manager: AuthUser = {
   branchAccess: [{ branchId, accessLevel: 'WRITE' }],
 };
 describe('Fuel reporting access boundaries', () => {
-  const prisma = { branch: { findFirst: jest.fn() }, fuelReport: { findMany: jest.fn() } };
+  const prisma = {
+    branch: { findFirst: jest.fn() },
+    fuelReport: {
+      findMany: jest.fn(),
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    fuelTank: { findMany: jest.fn().mockResolvedValue([]) },
+    fuelPump: { findMany: jest.fn().mockResolvedValue([]) },
+    product: { findMany: jest.fn().mockResolvedValue([]) },
+  };
   const scope = { assertCanAccessCompany: jest.fn() };
   const service = new FuelReportingService(
     prisma as unknown as PrismaService,
@@ -46,6 +58,50 @@ describe('Fuel reporting access boundaries', () => {
       service.history({ ...manager, companyId: 'company', branchAccess: [] }, branchId),
     ).rejects.toThrow(/not assigned/);
     await expect(service.history(manager, branchId)).resolves.toEqual([]);
+  });
+  it('reports station write access separately from the manager’s reporting role', async () => {
+    const readOnly = {
+      ...manager,
+      branchAccess: [{ branchId, accessLevel: AccessLevel.READ }],
+    };
+    const reviewer = { ...manager, permissions: ['fuel_reporting.read'] };
+    await expect(service.workspace(readOnly, branchId, '2026-09-30', 'DAY')).resolves.toMatchObject(
+      {
+        canManageReports: false,
+      },
+    );
+    await expect(service.workspace(reviewer, branchId, '2026-09-30', 'DAY')).resolves.toMatchObject(
+      {
+        canManageReports: false,
+      },
+    );
+    await expect(service.workspace(manager, branchId, '2026-09-30', 'DAY')).resolves.toMatchObject({
+      canManageReports: true,
+    });
+  });
+
+  it('checks company write access for a reporting administrator', async () => {
+    const admin = {
+      ...manager,
+      roles: ['GROUP_SUPER_ADMIN'],
+      permissions: [...manager.permissions, 'fuel_reporting.admin'],
+    };
+    scope.assertCanAccessCompany
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new ForbiddenException());
+    await expect(service.workspace(admin, branchId, '2026-09-30', 'DAY')).resolves.toMatchObject({
+      canManageReports: false,
+      canConfigure: false,
+    });
+    expect(scope.assertCanAccessCompany).toHaveBeenLastCalledWith(
+      admin,
+      'company',
+      AccessLevel.WRITE,
+    );
+    await expect(service.workspace(admin, branchId, '2026-09-30', 'DAY')).resolves.toMatchObject({
+      canManageReports: true,
+      canConfigure: true,
+    });
   });
   it('rejects all station administration from a manager with an accidental admin grant', async () => {
     const mistaken = { ...manager, permissions: [...manager.permissions, 'fuel_reporting.admin'] };
