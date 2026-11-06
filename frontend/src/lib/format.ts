@@ -1,9 +1,9 @@
 /**
  * Shared money / number / date formatting for the Itemba frontend.
  *
- * One locale everywhere: en-GB. TZS is the base currency and has no cents in
- * practice, so it renders as whole shillings ("TZS 1,234,567"); every other
- * currency keeps 2 decimal places ("USD 1,234.56").
+ * One locale everywhere: en-GB. Default TZS summaries render as whole shillings
+ * ("TZS 1,234,567"); settlement displays preserve persisted fractional shillings.
+ * Every other currency keeps 2 decimal places ("USD 1,234.56").
  *
  * All helpers are dependency-free and safe on null / undefined / NaN input.
  */
@@ -42,6 +42,17 @@ export function formatMoney(
   const code = toCurrency(currency);
   const amount = toNumber(value);
   if (code === 'TZS') return `TZS ${WHOLE_FORMAT.format(amount)}`;
+  return `${code} ${CENTS_FORMAT.format(amount)}`;
+}
+
+/** Preserve fractional shillings when displaying an amount that can be settled or corrected. */
+export function formatSettlementMoney(
+  value: number | string | null | undefined,
+  currency: string = 'TZS',
+): string {
+  const code = toCurrency(currency);
+  const amount = toNumber(value);
+  if (code === 'TZS' && Number.isInteger(amount)) return formatMoney(amount, code);
   return `${code} ${CENTS_FORMAT.format(amount)}`;
 }
 
@@ -115,12 +126,15 @@ export function sumByCurrency(
  * Single currency: "TZS 1,234,567". Mixed: "TZS 1,234,567 + USD 2,340.00"
  * (TZS first, then alphabetical). An empty map renders "TZS 0".
  */
-export function formatMoneyTotals(totals: Map<string, number>): string {
+export function formatMoneyTotals(
+  totals: Map<string, number>,
+  formatter: typeof formatMoney = formatMoney,
+): string {
   if (totals.size === 0) return formatMoney(0);
   const codes = [...totals.keys()].sort((a, b) => {
     if (a === 'TZS') return -1;
     if (b === 'TZS') return 1;
     return a.localeCompare(b);
   });
-  return codes.map((code) => formatMoney(totals.get(code), code)).join(' + ');
+  return codes.map((code) => formatter(totals.get(code), code)).join(' + ');
 }

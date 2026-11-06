@@ -33,7 +33,7 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { usePartyCredit } from '@/hooks/use-party-credit';
 import { DocumentArtifactButton } from '@/components/documents';
-import { formatDate, formatMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
+import { formatDate, formatSettlementMoney, formatMoneyTotals, sumByCurrency } from '@/lib/format';
 import { localToday } from '@/features/invoice-desk/types';
 import {
   canDeleteFinancialDocument,
@@ -454,7 +454,9 @@ function ReceivableDetailModal({
             <DetailItem
               label="Credit Limit"
               value={
-                partyCredit ? formatMoney(partyCredit.creditLimit, partyCredit.baseCurrency) : '—'
+                partyCredit
+                  ? formatSettlementMoney(partyCredit.creditLimit, partyCredit.baseCurrency)
+                  : '—'
               }
             />
             <DetailItem
@@ -520,13 +522,13 @@ function ReceivableDetailModal({
                         <InlineStatus status={order.paymentStatus} />
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.totalAmount, currency)}
+                        {formatSettlementMoney(order.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.paidAmount, currency)}
+                        {formatSettlementMoney(order.paidAmount, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(order.outstandingAmount, currency)}
+                        {formatSettlementMoney(order.outstandingAmount, currency)}
                       </td>
                     </tr>
                   ))}
@@ -551,10 +553,10 @@ function ReceivableDetailModal({
                       <td className="px-3 py-2">{sale.product?.name ?? '-'}</td>
                       <td className="px-3 py-2 text-right font-mono">{fmtQty(sale.litres, 3)}</td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(sale.pricePerLitre, currency)}
+                        {formatSettlementMoney(sale.pricePerLitre, currency)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(sale.totalAmount, currency)}
+                        {formatSettlementMoney(sale.totalAmount, currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={sale.status} />
@@ -573,7 +575,7 @@ function ReceivableDetailModal({
                       <td className="px-3 py-2">{fmtDetailDate(billing.billingDate)}</td>
                       <td className="px-3 py-2">{billing.description}</td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(billing.amount, billing.currency)}
+                        {formatSettlementMoney(billing.amount, billing.currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={billing.status} />
@@ -594,7 +596,7 @@ function ReceivableDetailModal({
                         {trip.origin} {'->'} {trip.destination}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {formatMoney(trip.revenueAmount, trip.currency)}
+                        {formatSettlementMoney(trip.revenueAmount, trip.currency)}
                       </td>
                       <td className="px-3 py-2">
                         <InlineStatus status={trip.status} />
@@ -639,16 +641,16 @@ function ReceivableDetailModal({
                   <td className="px-3 py-2 text-right font-mono">{fmtQty(line.quantity, 2)}</td>
                   <td className="px-3 py-2">{unitLabel(line.unit)}</td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.unitPrice, currency)}
+                    {formatSettlementMoney(line.unitPrice, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.discountAmount, currency)}
+                    {formatSettlementMoney(line.discountAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.taxAmount, currency)}
+                    {formatSettlementMoney(line.taxAmount, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {formatMoney(line.lineTotal, currency)}
+                    {formatSettlementMoney(line.lineTotal, currency)}
                   </td>
                 </tr>
               ))}
@@ -673,11 +675,11 @@ function ReceivableDetailModal({
                 />
                 <DetailItem
                   label="Total Debit"
-                  value={formatMoney(detail.journalEntry.totalDebit, currency)}
+                  value={formatSettlementMoney(detail.journalEntry.totalDebit, currency)}
                 />
                 <DetailItem
                   label="Total Credit"
-                  value={formatMoney(detail.journalEntry.totalCredit, currency)}
+                  value={formatSettlementMoney(detail.journalEntry.totalCredit, currency)}
                 />
                 <DetailItem label="Posted At" value={fmtDateTime(detail.journalEntry.postedAt)} />
               </DetailGrid>
@@ -694,10 +696,10 @@ function ReceivableDetailModal({
                           </td>
                           <td className="px-3 py-2">{line.description ?? '-'}</td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {formatMoney(line.debit, currency)}
+                            {formatSettlementMoney(line.debit, currency)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono">
-                            {formatMoney(line.credit, currency)}
+                            {formatSettlementMoney(line.credit, currency)}
                           </td>
                         </tr>
                       ))
@@ -811,7 +813,7 @@ export function RecordPaymentModal({
     const outstanding = receivableOutstandingAmount(receivable);
     if (amt > outstanding) {
       setError(
-        `Amount cannot exceed outstanding balance ${formatMoney(outstanding, receivable.currency)}`,
+        `Amount cannot exceed outstanding balance ${formatSettlementMoney(outstanding, receivable.currency)}`,
       );
       return;
     }
@@ -879,7 +881,7 @@ export function RecordPaymentModal({
       open
       onClose={onClose}
       title={replacement ? 'Record Replacement Payment' : 'Record Payment'}
-      subtitle={`Outstanding: ${formatMoney(receivableOutstandingAmount(receivable), receivable.currency)}`}
+      subtitle={`Outstanding: ${formatSettlementMoney(receivableOutstandingAmount(receivable), receivable.currency)}`}
       size="md"
       footer={
         <>
@@ -1691,10 +1693,13 @@ export default function ReceivablesPage() {
           value={totalRecords}
         />
         <StatCard label="Open (page)" value={openRecords} />
-        <StatCard label="Outstanding (page)" value={formatMoneyTotals(outstandingTotals)} />
+        <StatCard
+          label="Outstanding (page)"
+          value={formatMoneyTotals(outstandingTotals, formatSettlementMoney)}
+        />
         <StatCard
           label="Overdue (page)"
-          value={formatMoneyTotals(overdueTotals)}
+          value={formatMoneyTotals(overdueTotals, formatSettlementMoney)}
           hint="Past due date"
         />
       </div>
@@ -1782,20 +1787,20 @@ export default function ReceivablesPage() {
           fields={[
             {
               label: 'Outstanding',
-              value: (r) => formatMoney(receivableOutstandingAmount(r), r.currency),
+              value: (r) => formatSettlementMoney(receivableOutstandingAmount(r), r.currency),
             },
             { label: 'Due', value: (r) => formatDate(r.dueDate) },
           ]}
           details={[
             { label: 'Issued', value: (r) => formatDate(r.issueDate) },
-            { label: 'Original amount', value: (r) => formatMoney(r.amount, r.currency) },
+            { label: 'Original amount', value: (r) => formatSettlementMoney(r.amount, r.currency) },
             {
               label: 'Cash collected',
-              value: (r) => formatMoney(receivablePaidAmount(r), r.currency),
+              value: (r) => formatSettlementMoney(receivablePaidAmount(r), r.currency),
             },
             {
               label: 'Non-cash settlement',
-              value: (r) => formatMoney(r.settlementAdjustmentAmount ?? 0, r.currency),
+              value: (r) => formatSettlementMoney(r.settlementAdjustmentAmount ?? 0, r.currency),
             },
             { label: 'Company', value: (r) => r.company?.name || '—' },
           ]}
@@ -1880,10 +1885,10 @@ export default function ReceivablesPage() {
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {formatMoney(account.amount, account.currency)}
+                            {formatSettlementMoney(account.amount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-green-700">
-                            {formatMoney(account.paidAmount, account.currency)}
+                            {formatSettlementMoney(account.paidAmount, account.currency)}
                             {account.documents.some(
                               (record) => Number(record.settlementAdjustmentAmount ?? 0) > 0,
                             ) && (
@@ -1899,10 +1904,10 @@ export default function ReceivablesPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-semibold">
-                            {formatMoney(account.outstandingAmount, account.currency)}
+                            {formatSettlementMoney(account.outstandingAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono">
-                            {formatMoney(account.overdueAmount, account.currency)}
+                            {formatSettlementMoney(account.overdueAmount, account.currency)}
                           </td>
                           <td className="px-4 py-3">{formatDate(account.nextDueDate)}</td>
                           <td className="px-4 py-3">
@@ -1970,14 +1975,17 @@ export default function ReceivablesPage() {
                                         <td className="px-3 py-2">{formatDate(r.issueDate)}</td>
                                         <td className="px-3 py-2">{formatDate(r.dueDate)}</td>
                                         <td className="px-3 py-2 text-right font-mono">
-                                          {formatMoney(r.amount, r.currency)}
+                                          {formatSettlementMoney(r.amount, r.currency)}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-green-700">
-                                          {formatMoney(receivablePaidAmount(r), r.currency)}
+                                          {formatSettlementMoney(
+                                            receivablePaidAmount(r),
+                                            r.currency,
+                                          )}
                                           {Number(r.settlementAdjustmentAmount ?? 0) > 0 && (
                                             <div className="text-xs mt-1">
                                               Non-cash:{' '}
-                                              {formatMoney(
+                                              {formatSettlementMoney(
                                                 r.settlementAdjustmentAmount,
                                                 r.currency,
                                               )}
@@ -1985,7 +1993,10 @@ export default function ReceivablesPage() {
                                           )}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold">
-                                          {formatMoney(receivableOutstandingAmount(r), r.currency)}
+                                          {formatSettlementMoney(
+                                            receivableOutstandingAmount(r),
+                                            r.currency,
+                                          )}
                                         </td>
                                         <td className="px-3 py-2">
                                           <StatusBadge status={financialDocumentStatus(r)} />
@@ -2067,18 +2078,19 @@ export default function ReceivablesPage() {
                       </td>
                       <td className="px-4 py-3 font-medium">{receivableCustomerName(r)}</td>
                       <td className="px-4 py-3 text-right font-mono">
-                        {formatMoney(r.amount, r.currency)}
+                        {formatSettlementMoney(r.amount, r.currency)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-green-700">
-                        {formatMoney(receivablePaidAmount(r), r.currency)}
+                        {formatSettlementMoney(receivablePaidAmount(r), r.currency)}
                         {Number(r.settlementAdjustmentAmount ?? 0) > 0 && (
                           <div className="text-xs mt-1">
-                            Non-cash: {formatMoney(r.settlementAdjustmentAmount, r.currency)}
+                            Non-cash:{' '}
+                            {formatSettlementMoney(r.settlementAdjustmentAmount, r.currency)}
                           </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">
-                        {formatMoney(receivableOutstandingAmount(r), r.currency)}
+                        {formatSettlementMoney(receivableOutstandingAmount(r), r.currency)}
                       </td>
                       <td className="px-4 py-3">{formatDate(r.issueDate)}</td>
                       <td className="px-4 py-3">{formatDate(r.dueDate)}</td>
