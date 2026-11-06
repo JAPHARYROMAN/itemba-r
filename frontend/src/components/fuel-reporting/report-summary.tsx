@@ -2,31 +2,31 @@
 import { amount, type Report, type Summary } from './types';
 import { Section } from './report-fields';
 
-export function SummaryCards({ summary }: { summary: Summary }) {
+export function SummaryCards({ summary }: { summary?: Summary }) {
   return (
-    <div className="fr-metrics">
+    <div className="fr-metrics" role="group" aria-label="Last saved shift totals">
       <div>
         <span>Fuel sold</span>
         <strong>
-          {amount(summary.litres, 3)} <small>L</small>
+          {amount(summary?.litres, 3)} <small>L</small>
         </strong>
       </div>
       <div>
         <span>Pump sales</span>
         <strong>
-          {amount(summary.sales)} <small>TZS</small>
+          {amount(summary?.sales)} <small>TZS</small>
         </strong>
       </div>
       <div>
         <span>Collections</span>
         <strong>
-          {amount(summary.collected)} <small>TZS</small>
+          {amount(summary?.collected)} <small>TZS</small>
         </strong>
       </div>
-      <div className={summary.flagged ? 'fr-metric-warning' : ''}>
+      <div className={summary?.flagged ? 'fr-metric-warning' : ''}>
         <span>Discrepancies</span>
         <strong>
-          {summary.flagged}
+          {summary?.flagged ?? '—'}
           <small> recorded</small>
         </strong>
       </div>

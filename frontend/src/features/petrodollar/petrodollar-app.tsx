@@ -20,14 +20,13 @@ import { DailySummary } from '@/components/fuel-reporting/report-summary';
 import { StationRegister } from '@/components/fuel-reporting/station-register';
 import { StationSetup } from '@/components/fuel-reporting/station-setup';
 import {
-  amount,
   stationDate,
   type Branch,
   type Report,
   type Workspace,
 } from '@/components/fuel-reporting/types';
 import { AppGlyph } from '@/components/os/app-glyph';
-import { FormDateField, PageSpinner, StatusBadge, WorkspaceTable } from '@/components/ui';
+import { FormDateField, PageSpinner } from '@/components/ui';
 import { useFormGuard } from '@/components/workspace/unsaved-work-provider';
 import {
   useWorkspaceRouter,
@@ -46,6 +45,7 @@ export { petrodollarView } from '@/lib/petrodollar-navigation';
 import '@/components/fuel-reporting/fuel-reporting.css';
 import '../invoice-desk/invoice-desk.css';
 import './petrodollar.css';
+import { PetroDollarHistory } from './petrodollar-history';
 import { PetroDollarPosting } from './petrodollar-posting';
 
 const SECTIONS: { id: View; label: string; blurb: string; icon: LucideIcon }[] = [
@@ -89,7 +89,6 @@ const SECTIONS: { id: View; label: string; blurb: string; icon: LucideIcon }[] =
 
 interface Bootstrap {
   company: { id: string; code: string; name: string };
-  canManage: boolean;
   canAdmin: boolean;
   branches: Branch[];
 }
@@ -118,19 +117,24 @@ export function PetroDollarApp() {
     '';
   const date = petrodollarDate(params.get('date'), today);
   const shift = params.get('shift') === 'NIGHT' ? 'NIGHT' : 'DAY';
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [history, setHistory] = useState<Report[]>([]);
-  const [moreHistory, setMoreHistory] = useState(false);
+  const [workspaceResult, setWorkspaceResult] = useState<{
+    key: string;
+    data: Workspace | null;
+    problem?: Problem;
+  } | null>(null);
   const [booting, setBooting] = useState(true);
-  const [loadingWorkspace, setLoadingWorkspace] = useState(false);
-  const [problem, setProblem] = useState<Problem | null>(null);
+  const [bootstrapProblem, setBootstrapProblem] = useState<Problem | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [editorLocked, setEditorLocked] = useState(false);
   const [postingLocked, setPostingLocked] = useState(false);
   const [setupLocked, setSetupLocked] = useState(false);
   const locked = editorLocked || postingLocked || setupLocked;
-  // History only needs the station list; the other views also wait for the shift's workspace.
-  const loading = view === 'history' || view === 'stations' ? booting : booting || loadingWorkspace;
+  const needsWorkspace = view !== 'history' && view !== 'stations';
+  const workspaceKey = `${branchId}/${date}/${shift}/${reloadKey}`;
+  const selectedWorkspace = workspaceResult?.key === workspaceKey ? workspaceResult : null;
+  const workspace = selectedWorkspace?.data;
+  const loading = booting || (needsWorkspace && !!branchId && !selectedWorkspace);
+  const problem = bootstrapProblem ?? (needsWorkspace ? selectedWorkspace?.problem : null);
   const branch = bootstrap?.branches.find((b) => b.id === branchId);
   const reload = () => setReloadKey((key) => key + 1);
 
@@ -179,12 +183,12 @@ export function PetroDollarApp() {
       .then((data) => {
         if (cancelled) return;
         setBootstrap(data);
-        setProblem(null);
+        setBootstrapProblem(null);
         setBooting(false);
       })
       .catch((error) => {
         if (cancelled) return;
-        setProblem(problemFrom(error));
+        setBootstrapProblem(problemFrom(error));
         setBooting(false);
       });
     return () => {
@@ -207,89 +211,58 @@ export function PetroDollarApp() {
   }, [branchId, date, shift, params, router, locked]);
 
   useEffect(() => {
-    if (!branchId) {
-      setWorkspace(null);
+    if (!needsWorkspace || !branchId) {
+      setWorkspaceResult(null);
       return;
     }
     let cancelled = false;
-    setLoadingWorkspace(true);
-    setWorkspace(null);
     backendGet<Workspace>('/petrodollar/workspace', {
       query: { branchId, businessDate: date, shift },
     })
       .then((data) => {
         if (cancelled) return;
-        setWorkspace(data);
-        setProblem(null);
-        setLoadingWorkspace(false);
+        setWorkspaceResult({ key: workspaceKey, data });
       })
       .catch((error) => {
         if (cancelled) return;
-        setProblem(problemFrom(error));
-        setLoadingWorkspace(false);
+        setWorkspaceResult({ key: workspaceKey, data: null, problem: problemFrom(error) });
       });
     return () => {
       cancelled = true;
     };
-  }, [branchId, date, shift, reloadKey]);
-
-  useEffect(() => {
-    setHistory([]);
-    if (view !== 'history' || !branchId) return;
-    let cancelled = false;
-    backendGet<Report[]>('/petrodollar/history', { query: { branchId } })
-      .then((data) => {
-        if (cancelled) return;
-        setHistory(data);
-        setMoreHistory(data.length === 50);
-      })
-      .catch((error) => {
-        if (!cancelled) setProblem(problemFrom(error));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view, branchId, reloadKey]);
+  }, [needsWorkspace, branchId, date, shift, workspaceKey]);
 
   const onSaved = useCallback(
     (report: Report) =>
-      setWorkspace((current) =>
-        current
+      setWorkspaceResult((current) =>
+        current?.key === workspaceKey && current.data
           ? {
-              ...current,
-              report,
-              daily: [...current.daily.filter((r) => r.id !== report.id), report].sort((a, b) =>
-                a.shift.localeCompare(b.shift),
-              ),
+              key: workspaceKey,
+              data: {
+                ...current.data,
+                report,
+                daily: [...current.data.daily.filter((r) => r.id !== report.id), report].sort(
+                  (a, b) => a.shift.localeCompare(b.shift),
+                ),
+              },
             }
           : current,
       ),
-    [],
+    [workspaceKey],
   );
   async function refreshStation() {
     const data = await backendGet<Bootstrap>('/petrodollar/bootstrap');
     setBootstrap(data);
     const selected = data.branches.find((b) => b.id === branchId)?.id ?? data.branches[0]?.id;
-    if (selected === branchId) {
-      setWorkspace(
-        await backendGet<Workspace>('/petrodollar/workspace', {
-          query: { branchId, businessDate: date, shift },
-        }),
+    if (needsWorkspace && selected === branchId) {
+      const data = await backendGet<Workspace>('/petrodollar/workspace', {
+        query: { branchId, businessDate: date, shift },
+      });
+      setWorkspaceResult((current) =>
+        current?.key === workspaceKey ? { key: workspaceKey, data } : current,
       );
     }
   }
-  async function olderReports() {
-    try {
-      const rows = await backendGet<Report[]>('/petrodollar/history', {
-        query: { branchId, before: history.at(-1)?.id },
-      });
-      setHistory((current) => [...current, ...rows]);
-      setMoreHistory(rows.length === 50);
-    } catch (error) {
-      setProblem(problemFrom(error));
-    }
-  }
-
   if (authLoading) return <PageSpinner label="Opening PetroDollar" />;
   if (!permitted)
     return (
@@ -486,7 +459,7 @@ export function PetroDollarApp() {
                     date={date}
                     shift={shift}
                     workspace={workspace}
-                    canManage={bootstrap?.canManage ?? false}
+                    canManage={workspace.canManageReports === true}
                     mode={view as 'report' | 'receive'}
                     onSaved={onSaved}
                     onLock={onLock}
@@ -521,56 +494,13 @@ export function PetroDollarApp() {
           </>
         )}
         {!loading && branch && view === 'history' && (
-          <div className="pd-history">
-            <WorkspaceTable label="Report history">
-              <thead>
-                <tr>
-                  <th>Business date</th>
-                  <th>Shift</th>
-                  <th>Status</th>
-                  <th>Sales · TZS</th>
-                  <th>Differences</th>
-                  <th>Revision</th>
-                  <th>Report</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.businessDate.slice(0, 10)}</td>
-                    <td>{r.shift === 'DAY' ? 'Day' : 'Night'}</td>
-                    <td>
-                      <StatusBadge status={r.status === 'CLOSED' ? 'CLOSED' : 'DRAFT'} />
-                    </td>
-                    <td className="pd-number">{amount(r.summary.sales)}</td>
-                    <td>{r.summary.flagged}</td>
-                    <td>{r.version}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="desk-text-button"
-                        onClick={() => {
-                          go('report', { date: r.businessDate.slice(0, 10), shift: r.shift });
-                        }}
-                      >
-                        Open report →
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </WorkspaceTable>
-            {!history.length && (
-              <p className="desk-empty">No reports have been saved for this station yet.</p>
-            )}
-            {moreHistory && (
-              <div className="desk-pagination">
-                <button type="button" onClick={olderReports}>
-                  Load older reports
-                </button>
-              </div>
-            )}
-          </div>
+          <PetroDollarHistory
+            key={`${branchId}/${reloadKey}`}
+            branchId={branchId}
+            onOpen={(report) =>
+              go('report', { date: report.businessDate.slice(0, 10), shift: report.shift })
+            }
+          />
         )}
         {!booting && bootstrap && view === 'stations' && bootstrap.canAdmin && (
           <div className="fuel-reporting pd-fr">

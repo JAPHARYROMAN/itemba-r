@@ -53,15 +53,17 @@ vi.mock('@/components/fuel-reporting/report-editor', () => ({
     branch,
     onLock,
     apiBase,
+    canManage,
   }: {
     mode: string;
     branch: { name: string };
     onLock: (locked: boolean) => void;
     apiBase?: string;
+    canManage: boolean;
   }) => {
     state.lock = onLock;
     return (
-      <section aria-label="Report editor" data-api-base={apiBase}>
+      <section aria-label="Report editor" data-api-base={apiBase} data-can-manage={canManage}>
         {mode} editor for {branch.name}
       </section>
     );
@@ -86,6 +88,7 @@ const bootstrap = (branches = [mpemba], canAdmin = false) => ({
   branches,
 });
 const workspace = (configured = true) => ({
+  canManageReports: true,
   catalog: configured
     ? {
         tanks: [
@@ -482,14 +485,86 @@ describe('PetroDollar', () => {
     expect(within(table).getAllByText('1,500,000.00')[0]).toBeVisible();
     expect(state.get).toHaveBeenCalledWith('/petrodollar/history', {
       query: { branchId: mpemba.id },
+      signal: expect.any(AbortSignal),
     });
-    serve({ '/petrodollar/history': history(2).map((r) => ({ ...r, id: `older-${r.id}` })) });
+    serve({ '/petrodollar/history': new Error('Older reports unavailable') });
     fireEvent.click(screen.getByRole('button', { name: 'Load older reports' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Older reports unavailable');
+    expect(within(table).getAllByText('Open report →')).toHaveLength(50);
+
+    const [duplicate] = history(50).slice(-1);
+    const older = history(2).map((r) => ({ ...r, id: `older-${r.id}` }));
+    serve({ '/petrodollar/history': [duplicate, ...older] });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading older reports' }));
     await waitFor(() => expect(within(table).getAllByText('Open report →')).toHaveLength(52));
     expect(state.get).toHaveBeenLastCalledWith('/petrodollar/history', {
       query: { branchId: mpemba.id, before: 'report-49' },
+      signal: expect.any(AbortSignal),
     });
     expect(screen.queryByRole('button', { name: 'Load older reports' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows history loading and errors before a successful empty response', async () => {
+    state.search = new URLSearchParams('view=history');
+    const pending = Promise.withResolvers<ReturnType<typeof history>>();
+    serve({ '/petrodollar/history': pending.promise });
+    renderApp();
+
+    expect(await screen.findByText('Loading report history…')).toBeVisible();
+    expect(screen.queryByText(/No reports have been saved/)).toBeNull();
+    await act(async () => pending.reject(new Error('History unavailable')));
+    expect(screen.getByRole('alert')).toHaveTextContent('History unavailable');
+    expect(screen.queryByText(/No reports have been saved/)).toBeNull();
+
+    serve();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry history' }));
+    expect(await screen.findByText(/No reports have been saved/)).toBeVisible();
+  });
+
+  it('ignores an older page after changing stations and allows only one request for its cursor', async () => {
+    state.search = new URLSearchParams('view=history');
+    serve({
+      '/petrodollar/bootstrap': bootstrap([mpemba, uzunguni]),
+      '/petrodollar/history': history(50),
+    });
+    renderApp();
+    const load = await screen.findByRole('button', { name: 'Load older reports' });
+    const pending = Promise.withResolvers<ReturnType<typeof history>>();
+    serve({ '/petrodollar/history': pending.promise });
+    fireEvent.click(load);
+    fireEvent.click(load);
+    expect(load).toBeDisabled();
+    const requests = state.get.mock.calls.filter(([, options]) => options?.query?.before);
+    expect(requests).toHaveLength(1);
+
+    serve({ '/petrodollar/history': history(1) });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Station' }), {
+      target: { value: uzunguni.id },
+    });
+    expect(await screen.findAllByText('Open report →')).toHaveLength(1);
+    expect(requests[0][1].signal.aborted).toBe(true);
+    await act(async () => pending.resolve(history(2)));
+    expect(screen.getAllByText('Open report →')).toHaveLength(1);
+  });
+
+  it('uses the selected workspace’s write permission as soon as it loads', async () => {
+    serve({ '/petrodollar/bootstrap': bootstrap([mpemba, uzunguni]) });
+    renderApp();
+    expect(await screen.findByRole('region', { name: 'Report editor' })).toHaveAttribute(
+      'data-can-manage',
+      'true',
+    );
+    const pending = Promise.withResolvers<ReturnType<typeof workspace>>();
+    serve({ '/petrodollar/workspace': pending.promise });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Station' }), {
+      target: { value: uzunguni.id },
+    });
+    expect(screen.queryByRole('region', { name: 'Report editor' })).toBeNull();
+    await act(async () => pending.resolve({ ...workspace(), canManageReports: false }));
+    const editor = await screen.findByRole('region', { name: 'Report editor' });
+    expect(editor).toHaveTextContent('Uzunguni');
+    expect(editor).toHaveAttribute('data-can-manage', 'false');
   });
 
   it('holds the window steady while a report has unsaved work or is saving', async () => {

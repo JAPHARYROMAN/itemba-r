@@ -286,6 +286,11 @@
   color: #1d6650;
 }
 .fr-save-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-inline-size: 22ch;
   color: var(--fr-muted);
   white-space: nowrap;
   font-size: 12px;
@@ -372,6 +377,12 @@
 }
 .fr-negative {
   color: #b42318;
+}
+.fuel-reporting .fr-field-error {
+  display: block;
+  margin-top: 4px;
+  color: #b42318;
+  white-space: normal;
 }
 .fr-grid {
   display: grid;

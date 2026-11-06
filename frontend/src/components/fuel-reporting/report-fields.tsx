@@ -1,5 +1,5 @@
 'use client';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { Catalog, Payload } from './types';
 import { amount } from './types';
 
@@ -32,23 +32,35 @@ export function Numeric({
   value,
   onChange,
   places = 2,
+  issue,
 }: {
   label: string;
   value: number | null;
   onChange: (value: number | null) => void;
   places?: number;
+  issue?: string;
 }) {
+  const issueId = useId();
   return (
-    <input
-      aria-label={label}
-      type="number"
-      min="0"
-      step={10 ** -places}
-      inputMode="decimal"
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-      placeholder="Enter value"
-    />
+    <>
+      <input
+        aria-label={label}
+        aria-invalid={issue ? true : undefined}
+        aria-describedby={issue ? issueId : undefined}
+        type="number"
+        min="0"
+        step={10 ** -places}
+        inputMode="decimal"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        placeholder="Enter value"
+      />
+      {issue && (
+        <small className="fr-field-error" id={issueId}>
+          {issue}
+        </small>
+      )}
+    </>
   );
 }
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -74,7 +86,12 @@ export function PumpReadings({ payload: p, catalog, change }: Props) {
           No pumps are configured for this branch. An admin must add them in Station setup.
         </p>
       ) : null}
-      <div className="fr-table-scroll" role="region" aria-label="Pump meter readings" tabIndex={0}>
+      <div
+        className="fr-table-scroll fr-pump-readings"
+        role="region"
+        aria-label="Pump meter readings"
+        tabIndex={0}
+      >
         <table>
           <thead>
             <tr>
@@ -126,6 +143,11 @@ export function PumpReadings({ payload: p, catalog, change }: Props) {
                       label={`Closing ${n?.nozzleCode} interval ${interval + 1}`}
                       value={r.closing}
                       places={3}
+                      issue={
+                        litres != null && litres < 0
+                          ? 'Closing meter must be at or above opening.'
+                          : undefined
+                      }
                       onChange={(closing) => update(i, { closing })}
                     />
                   </td>
@@ -134,6 +156,11 @@ export function PumpReadings({ payload: p, catalog, change }: Props) {
                       label={`Price ${n?.nozzleCode} interval ${interval + 1}`}
                       value={r.price}
                       places={4}
+                      issue={
+                        litres != null && litres >= 0 && !(r.price && r.price > 0)
+                          ? 'Enter a positive selling price.'
+                          : undefined
+                      }
                       onChange={(price) => update(i, { price })}
                     />
                   </td>
@@ -296,7 +323,7 @@ export function FuelReceived({ payload: p, catalog, change }: Props) {
     <Section
       number="03"
       title="Fuel received"
-      detail="Record each delivery by fuel type and litres. Supplier details and purchase cost are optional; no receiving tank is needed."
+      detail="Record each delivery by fuel type and litres. To post the shift to your apps, enter a positive purchase cost for every delivery."
     >
       {p.deliveries.length === 0 ? (
         <p className="fr-empty">No deliveries entered for this shift.</p>
@@ -333,6 +360,7 @@ export function FuelReceived({ payload: p, catalog, change }: Props) {
                 label={`Litres received ${i + 1}`}
                 places={3}
                 value={r.litres}
+                issue={r.litres <= 0 ? 'Enter the litres received.' : undefined}
                 onChange={(litres) => update(i, { litres: litres ?? 0 })}
               />
             </Field>
@@ -350,7 +378,7 @@ export function FuelReceived({ payload: p, catalog, change }: Props) {
                 onChange={(e) => update(i, { reference: e.target.value })}
               />
             </Field>
-            <Field label="Total purchase cost · optional">
+            <Field label="Total purchase cost · required for posting">
               <Numeric
                 label={`Purchase cost ${i + 1}`}
                 value={r.totalCost}
@@ -361,18 +389,29 @@ export function FuelReceived({ payload: p, catalog, change }: Props) {
               <Numeric
                 label={`Supplier payment ${i + 1}`}
                 value={r.paidAmount}
+                issue={
+                  r.totalCost != null && r.paidAmount > r.totalCost
+                    ? 'Payment cannot exceed the purchase cost.'
+                    : undefined
+                }
                 onChange={(paidAmount) => update(i, { paidAmount: paidAmount ?? 0 })}
               />
             </Field>
-            <Field label="Payment source">
-              <select
-                value={r.paymentSource}
-                onChange={(e) => update(i, { paymentSource: e.target.value })}
-              >
-                <option value="OTHER">Other account / unpaid</option>
-                <option value="SHIFT_CASH">This shift’s cash</option>
-              </select>
-            </Field>
+            {r.paidAmount > 0 ? (
+              <Field label="Payment source">
+                <select
+                  value={r.paymentSource}
+                  onChange={(e) => update(i, { paymentSource: e.target.value })}
+                >
+                  <option value="OTHER">Other account</option>
+                  <option value="SHIFT_CASH">This shift’s cash</option>
+                </select>
+              </Field>
+            ) : (
+              <p className="fr-field">
+                <span>Payment status</span>Unpaid
+              </p>
+            )}
           </div>
         </div>
       ))}
@@ -544,6 +583,11 @@ export function TankDips({ payload: p, catalog, change }: Props) {
                       label={`Opening dip ${t.tankName}`}
                       value={dip?.opening ?? null}
                       places={3}
+                      issue={
+                        (dip?.opening ?? 0) > t.capacityLitres
+                          ? 'Opening volume exceeds tank capacity.'
+                          : undefined
+                      }
                       onChange={(opening) => update({ opening })}
                     />
                   </td>
@@ -552,6 +596,11 @@ export function TankDips({ payload: p, catalog, change }: Props) {
                       label={`Closing dip ${t.tankName}`}
                       value={dip?.closing ?? null}
                       places={3}
+                      issue={
+                        (dip?.closing ?? 0) > t.capacityLitres
+                          ? 'Closing volume exceeds tank capacity.'
+                          : undefined
+                      }
                       onChange={(closing) => update({ closing })}
                     />
                   </td>

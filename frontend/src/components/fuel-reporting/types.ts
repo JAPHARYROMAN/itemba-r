@@ -124,6 +124,7 @@ export interface StationPump {
   nozzles?: { id: string; nozzleCode: string; tankId: string; productId: string; status: string }[];
 }
 export interface Workspace {
+  canManageReports: boolean;
   catalog: Catalog;
   report: Report | null;
   previous: Report | null;

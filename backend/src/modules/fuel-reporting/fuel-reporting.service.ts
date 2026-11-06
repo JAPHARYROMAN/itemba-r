@@ -42,8 +42,12 @@ export class FuelReportingService {
     );
   }
 
+  private isReportManager(user: AuthUser) {
+    return this.isAdmin(user) || user.roles.includes('BRANCH_MANAGER');
+  }
+
   private assertManager(user: AuthUser) {
-    if (!this.isAdmin(user) && !user.roles.includes('BRANCH_MANAGER'))
+    if (!this.isReportManager(user))
       throw new ForbiddenException('Only a station branch manager can submit fuel reports.');
     if (!user.permissions.includes('fuel_reporting.manage'))
       throw new ForbiddenException('Fuel reporting management permission required.');
@@ -72,6 +76,16 @@ export class FuelReportingService {
     });
     if (!branch || branch.division.company.deletedAt)
       throw new NotFoundException('Branch not found.');
+    await this.assertStationAccess(user, branchId, branch.division.companyId, write);
+    return branch;
+  }
+
+  private async assertStationAccess(
+    user: AuthUser,
+    branchId: string,
+    companyId: string,
+    write: boolean,
+  ) {
     // Even when a branch manager has company membership, that does not grant
     // authority to enter another station's report.
     const restricted =
@@ -81,15 +95,14 @@ export class FuelReportingService {
       const access = user.branchAccess?.find((a) => a.branchId === branchId);
       if (!access || rank(access.accessLevel) < (write ? 2 : 1))
         throw new ForbiddenException('This station is not assigned to you.');
-      await this.scope.assertCanAccessCompany(user, branch.division.companyId, AccessLevel.READ);
+      await this.scope.assertCanAccessCompany(user, companyId, AccessLevel.READ);
     } else {
       await this.scope.assertCanAccessCompany(
         user,
-        branch.division.companyId,
+        companyId,
         write ? AccessLevel.WRITE : AccessLevel.READ,
       );
     }
-    return branch;
   }
 
   private async reportingCompanyIds(user: AuthUser, companyId?: string) {
@@ -124,9 +137,7 @@ export class FuelReportingService {
       orderBy: { name: 'asc' },
     });
     return {
-      canManage:
-        (this.isAdmin(user) || user.roles.includes('BRANCH_MANAGER')) &&
-        user.permissions.includes('fuel_reporting.manage'),
+      canManage: this.isReportManager(user) && user.permissions.includes('fuel_reporting.manage'),
       canAdmin: this.isAdmin(user),
       branches: branches.map((b) => ({
         id: b.id,
@@ -200,6 +211,7 @@ export class FuelReportingService {
     const branch = await this.branch(user, branchId);
     const date = this.date(businessDate);
     if (!['DAY', 'NIGHT'].includes(shift)) throw new BadRequestException('Select Day or Night.');
+    const admin = this.isAdmin(user);
     const [catalog, report, previous, daily, products, pumps, tanks] = await Promise.all([
       this.catalog(this.prisma, branchId),
       this.prisma.fuelReport.findUnique({
@@ -223,7 +235,7 @@ export class FuelReportingService {
           pumpName: true,
           status: true,
           updatedAt: true,
-          ...(this.isAdmin(user)
+          ...(admin
             ? {
                 nozzles: {
                   where: { deletedAt: null },
@@ -241,7 +253,7 @@ export class FuelReportingService {
         },
         orderBy: { pumpCode: 'asc' },
       }),
-      this.isAdmin(user)
+      admin
         ? this.prisma.fuelTank.findMany({
             where: { branchId },
             include: { product: { select: { name: true } } },
@@ -249,11 +261,13 @@ export class FuelReportingService {
           })
         : Promise.resolve([]),
     ]);
-    let canConfigure = false;
-    if (this.isAdmin(user)) {
+    const reportManager =
+      this.isReportManager(user) && user.permissions.includes('fuel_reporting.manage');
+    let stationWrite = false;
+    if (admin || reportManager) {
       try {
-        await this.scope.assertCanAccessCompany(user, branch.division.companyId, AccessLevel.WRITE);
-        canConfigure = true;
+        await this.assertStationAccess(user, branchId, branch.division.companyId, true);
+        stationWrite = true;
       } catch (error) {
         if (!(error instanceof ForbiddenException)) throw error;
       }
@@ -265,7 +279,8 @@ export class FuelReportingService {
       daily,
       products,
       pumps,
-      canConfigure,
+      canConfigure: admin && stationWrite,
+      canManageReports: reportManager && stationWrite,
       tanks: tanks.map((t) => ({
         id: t.id,
         tankCode: t.tankCode,
