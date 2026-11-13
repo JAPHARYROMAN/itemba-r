@@ -831,7 +831,7 @@ export default function QuotationsPage() {
       />
       {consolidated ? (
         <PartyTransactionRegister<Quotation>
-          endpoint="/quotations"
+          endpoint="/westsides/quotations"
           query={{}}
           revision={items}
           snapshot={businessTransactionSnapshot}

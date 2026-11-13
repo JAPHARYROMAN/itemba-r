@@ -287,8 +287,8 @@ export function RecordBrowser<T extends { id: string }>({
             {reference && <p className="record-reference">{reference(selected)}</p>}
             {status && <StatusBadge value={status(selected)} />}
             <dl>
-              {[...fields, ...details].map((f) => (
-                <div key={f.label}>
+              {[...fields, ...details].map((f, index) => (
+                <div key={`${f.label}-${index}`}>
                   <dt>{f.label}</dt>
                   <dd>{f.value(selected) ?? '—'}</dd>
                 </div>
