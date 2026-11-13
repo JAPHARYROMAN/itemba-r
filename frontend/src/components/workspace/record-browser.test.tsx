@@ -29,6 +29,40 @@ beforeEach(() => {
 });
 
 describe('Record browser continuity', () => {
+  it('keeps repeated summary and detail labels visible without key warnings when selection changes', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(
+        <RecordBrowser
+          records={[row, { ...row, id: 'second', name: 'October count', quantity: 40 }]}
+          title="Counts"
+          name={(record) => record.name}
+          fields={[{ label: 'Total', value: (record) => `Summary ${record.quantity}` }]}
+          details={[
+            { label: 'Transaction ID', value: (record) => record.id },
+            { label: 'Total', value: (record) => `Detail ${record.quantity}` },
+          ]}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Inspect September count' }));
+      const inspector = within(screen.getByLabelText('Record details'));
+      expect(inspector.getAllByText('Total')).toHaveLength(2);
+      expect(inspector.getByText('Summary 20')).toBeVisible();
+      expect(inspector.getByText('Detail 20')).toBeVisible();
+      expect(inspector.getByText('count')).toBeVisible();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Inspect October count' }));
+      expect(inspector.getAllByText('Total')).toHaveLength(2);
+      expect(inspector.getByText('Summary 40')).toBeVisible();
+      expect(inspector.getByText('Detail 40')).toBeVisible();
+      expect(inspector.queryByText('Detail 20')).not.toBeInTheDocument();
+      expect(inspector.getByText('second')).toBeVisible();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('gives the list the initial view and keeps every supplied field labelled', () => {
     render(
       <RecordBrowser

@@ -700,7 +700,7 @@ export default function ProformaInvoicesPage() {
       />
       {consolidated ? (
         <PartyTransactionRegister<ProformaInvoice>
-          endpoint="/proforma-invoices"
+          endpoint="/westsides/proforma-invoices"
           query={{}}
           revision={items}
           snapshot={businessTransactionSnapshot}
